@@ -38,6 +38,11 @@ guaranteed structured output, automatic query logging, SQLite/FTS5 caching, and 
   - `literature_review(topic)` — Step-by-step literature review workflow for agents.
   - `summarize_paper(doi_or_title)` — Structured paper summarization guide.
 
+## Architecture
+
+- **Search (cache-first)**: `search_papers` cleans and parses the query (`query_broker.py`), then fans out through a per-source adapter registry (`sources/registry.py`) to `arxiv`, `crossref`, `garuda`, `doaj`, `europepmc`, `hal`, and `pmc`. Every query and result is persisted to SQLite + FTS5 (`cache.py`), so repeat searches are served from the local cache unless `force_refresh` is set.
+- **Download**: `download_paper` resolves OJS/DOAJ/Garuda landing pages and DOI redirects (`ojs.py`), then downloads the PDF through a browser-impersonating HTTP client (`curl-cffi`, `http.py`) and extracts Markdown via `pymupdf` with a `pymupdf4llm` fallback (`pdf.py`). DOIs without a direct PDF fall back to Unpaywall.
+
 ## Requirements & Environment
 
 - Python 3.13, `uv` (or `uv run`).
@@ -48,9 +53,10 @@ guaranteed structured output, automatic query logging, SQLite/FTS5 caching, and 
 
 ```bash
 uv sync            # install dependencies
-uv run pytest      # 57 tests (including OJS offline suite)
+uv run pytest              # offline suite (currently 57 tests)
+uv run pytest -m network   # live tests hitting real APIs (skipped by default)
 uv run ruff check src/ tests/
 uv run ruff format src/ tests/
 ```
 
-Live-source tests are tagged `network` and skipped by default; run them with `uv run pytest -m network`.
+The repo is driven by OpenSpec: specs live in `openspec/specs/` and completed changes are archived in `openspec/changes/archive/`; new work starts via the `openspec-propose` skill.
