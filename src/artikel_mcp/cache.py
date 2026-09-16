@@ -83,7 +83,10 @@ class PaperCache:
     def __init__(self, path: str | Path | None = None):
         self.path = Path(path) if path else default_db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
+        # check_same_thread=False: MCP runs tool calls on a worker thread.
+        # sqlite serializes writes via its internal mutex; short transactions
+        # and a single stdio user make cross-thread reuse safe enough.
+        self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         logger.debug("cache opened at %s", self.path)
@@ -94,17 +97,20 @@ class PaperCache:
     def upsert(self, record: PaperRecord) -> str:
         """Insert or update a record; returns its dedup key."""
         key = record.dedup_key()
-        raw = json.dumps({
-            "source": record.source,
-            "source_id": record.source_id,
-            "doi": record.doi,
-            "title": record.title,
-            "authors": record.authors,
-            "abstract": record.abstract,
-            "year": record.year,
-            "pdf_url": record.pdf_url,
-            "extra": record.extra,
-        }, ensure_ascii=False)
+        raw = json.dumps(
+            {
+                "source": record.source,
+                "source_id": record.source_id,
+                "doi": record.doi,
+                "title": record.title,
+                "authors": record.authors,
+                "abstract": record.abstract,
+                "year": record.year,
+                "pdf_url": record.pdf_url,
+                "extra": record.extra,
+            },
+            ensure_ascii=False,
+        )
         self._conn.execute(
             """
             INSERT INTO papers
@@ -123,9 +129,18 @@ class PaperCache:
                 raw_json=excluded.raw_json,
                 updated_at=datetime('now')
             """,
-            (key, record.source, record.source_id, record.doi, record.title,
-             json.dumps(record.authors, ensure_ascii=False), record.abstract,
-             record.year, record.pdf_url, raw),
+            (
+                key,
+                record.source,
+                record.source_id,
+                record.doi,
+                record.title,
+                json.dumps(record.authors, ensure_ascii=False),
+                record.abstract,
+                record.year,
+                record.pdf_url,
+                raw,
+            ),
         )
         self._conn.commit()
         logger.debug("cache upsert %s (%s)", key, record.source)
@@ -135,9 +150,7 @@ class PaperCache:
         return [self.upsert(r) for r in records]
 
     def get_by_key(self, dedup_key: str) -> PaperRecord | None:
-        row = self._conn.execute(
-            "SELECT * FROM papers WHERE dedup_key=?", (dedup_key,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM papers WHERE dedup_key=?", (dedup_key,)).fetchone()
         if row is None:
             logger.debug("cache miss %s", dedup_key)
             return None

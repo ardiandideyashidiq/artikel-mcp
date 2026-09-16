@@ -59,8 +59,9 @@ def search_all(
     for name in selected:
         try:
             adapter = _REGISTRY[name]()
-            records.extend(adapter.search(query, limit=limit))
-            logger.info("source %s returned %d records", name)
+            found = adapter.search(query, limit=limit)
+            records.extend(found)
+            logger.info("source %s returned %d records", name, len(found))
         except Exception as e:  # isolation: one bad source never kills the rest
             logger.warning("source %s failed: %s", name, e)
             errors.append(f"{name}: {e}")

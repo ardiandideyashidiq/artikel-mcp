@@ -22,9 +22,7 @@ class DoajAdapter(SourceAdapter):
 
     def search(self, query: str, limit: int = 20) -> list[PaperRecord]:
         try:
-            raw = self._client.get(
-                BASE + query, params={"pageSize": str(limit)}
-            )
+            raw = self._client.get(BASE + query, params={"pageSize": str(limit)})
         except HttpError as e:
             raise AdapterError(f"doaj request failed: {e}") from e
         try:

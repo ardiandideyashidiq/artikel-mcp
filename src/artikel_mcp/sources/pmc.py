@@ -74,11 +74,7 @@ class PmcAdapter(SourceAdapter):
         article_ids = {a["idtype"]: a["value"] for a in entry.get("articleids", [])}
         pmcid = article_ids.get("pmcid")
         doi = _extract_doi(article_ids, entry)
-        pdf = (
-            f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/"
-            if pmcid
-            else None
-        )
+        pdf = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/" if pmcid else None
         source_id = pmcid if pmcid else uid
         return PaperRecord(
             source=self.name,

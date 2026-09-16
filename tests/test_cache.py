@@ -22,9 +22,7 @@ def test_schema_creates(cache):
 
 
 def test_dedup_upsert_single_row(cache):
-    r = PaperRecord(
-        source="crossref", source_id="a1", title="Paper", doi="10.1000/abc"
-    )
+    r = PaperRecord(source="crossref", source_id="a1", title="Paper", doi="10.1000/abc")
     k1 = cache.upsert(r)
     k2 = cache.upsert(r)
     assert k1 == k2
@@ -42,7 +40,9 @@ def test_doi_preferred_over_source_prefix(cache):
 
 def test_fts_matches_abstract_only(cache):
     rec = PaperRecord(
-        source="arxiv", source_id="2101.00001", title="Mild Title",
+        source="arxiv",
+        source_id="2101.00001",
+        title="Mild Title",
         abstract="Quantum entanglement is the key concept here",
     )
     cache.upsert(rec)

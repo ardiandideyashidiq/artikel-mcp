@@ -1,6 +1,5 @@
 """Registry fan-out with per-source error isolation (no network)."""
 
-
 from artikel_mcp.models import PaperRecord
 from artikel_mcp.sources import registry
 from artikel_mcp.sources.base import AdapterError

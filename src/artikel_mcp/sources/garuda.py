@@ -28,13 +28,9 @@ _TITLE_RE = re.compile(
     r'<a class="title-article" href="(/documents/detail/\d+)">\s*<xmp>(.*?)</xmp>',
     re.S,
 )
-_AUTHOR_RE = re.compile(
-    r'<a class="author-article"[^>]*>\s*<xmp>(.*?)</xmp>', re.S
-)
+_AUTHOR_RE = re.compile(r'<a class="author-article"[^>]*>\s*<xmp>(.*?)</xmp>', re.S)
 _DOWNLOAD_RE = re.compile(r'href="([^"]*/article/download/[^"]+)"')
-_SUBTITLE_RE = re.compile(
-    r'<xmp class="subtitle-article">(.*?)</xmp>', re.S
-)
+_SUBTITLE_RE = re.compile(r'<xmp class="subtitle-article">(.*?)</xmp>', re.S)
 
 
 class GarudaAdapter(SourceAdapter):
@@ -50,9 +46,7 @@ class GarudaAdapter(SourceAdapter):
             raise AdapterError(f"garuda request failed: {e}") from e
 
         if 'class="article-item"' not in html:
-            raise AdapterError(
-                "garuda page structure unrecognized; selectors may be stale"
-            )
+            raise AdapterError("garuda page structure unrecognized; selectors may be stale")
 
         records: list[PaperRecord] = []
         start_positions = [m.start() for m in _ITEM_START_RE.finditer(html)]

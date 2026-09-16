@@ -52,9 +52,7 @@ class CrossrefAdapter(SourceAdapter):
             raise AdapterError("missing title")
         authors = []
         for a in it.get("author") or []:
-            name = " ".join(
-                p for p in (a.get("given"), a.get("family")) if p
-            ).strip()
+            name = " ".join(p for p in (a.get("given"), a.get("family")) if p).strip()
             if name:
                 authors.append(name)
         issued = it.get("issued", {}).get("date-parts") or [[None]]

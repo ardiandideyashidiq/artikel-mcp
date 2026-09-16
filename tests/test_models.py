@@ -13,7 +13,5 @@ def test_roundtrip_nullable_fields_unset():
 
 
 def test_dedup_key_prefers_doi():
-    rec = PaperRecord(
-        source="crossref", source_id="abc123", title="X", doi="10.1234/ABC.1"
-    )
+    rec = PaperRecord(source="crossref", source_id="abc123", title="X", doi="10.1234/ABC.1")
     assert rec.dedup_key().lower() == "10.1234/abc.1"

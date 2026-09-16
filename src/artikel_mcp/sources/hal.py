@@ -12,10 +12,7 @@ from artikel_mcp.sources.base import AdapterError, SourceAdapter, clean_html
 logger = logging.getLogger("artikel_mcp.sources.hal")
 
 BASE = "https://api.archives-ouvertes.fr/search/"
-FIELDS = (
-    "halId_s,title_s,abstract_s,authFullName_s,doiId_s,"
-    "producedDateY_i,fileMain_s,uri_s"
-)
+FIELDS = "halId_s,title_s,abstract_s,authFullName_s,doiId_s,producedDateY_i,fileMain_s,uri_s"
 
 
 def _first(value) -> str | None:
