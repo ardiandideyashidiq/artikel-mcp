@@ -44,5 +44,5 @@
 
 ## 7. Docs & polish
 
-- [ ] 7.1 Update README with supported sources, env vars (`UNPAYWALL_EMAIL`), DB path override, and known ceilings (sync extraction, no RAG/citations yet)
-- [ ] 7.2 Add `ponytail:` ceiling comments at the two documented limits (sync PDF work, isolated Garuda scraper) and verify a final full test run passes
+- [x] 7.1 Update README with supported sources, env vars (`UNPAYWALL_EMAIL`), DB path override, and known ceilings (sync extraction, no RAG/citations yet)
+- [x] 7.2 Add `ponytail:` ceiling comments at the two documented limits (sync PDF work, isolated Garuda scraper) and verify a final full test run passes
