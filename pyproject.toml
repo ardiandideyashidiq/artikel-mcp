@@ -4,13 +4,21 @@ version = "0.1.0"
 description = "MCP server for article workflows"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["mcp[cli]>=2.2.0"]
+dependencies = [
+    "curl-cffi>=0.16.3",
+    "mcp[cli]>=2.2.0",
+    "pymupdf>=1.28.2",
+    "pymupdf4llm>=1.28.2",
+]
 
 [project.scripts]
 artikel-mcp = "artikel_mcp.server:main"
 
 [dependency-groups]
-dev = ["ruff>=0.9"]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.9",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -25,3 +33,8 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+markers = [
+    "network: live tests that hit real external APIs",
+]
