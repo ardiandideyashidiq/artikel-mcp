@@ -77,7 +77,7 @@ class HttpClient:
         logger.debug("GET %s params=%s timeout=%s", url, params or {}, timeout)
         try:
             resp = self._session.get(url, params=params, headers=merged, timeout=timeout)
-        except crequests.RequestException as e:
+        except (crequests.RequestsError, Exception) as e:
             raise HttpError(f"GET {url} failed: {e}") from e
         if resp.status_code >= 400:
             _log_error(url, resp)

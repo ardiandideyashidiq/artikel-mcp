@@ -12,7 +12,10 @@ from artikel_mcp.sources.base import AdapterError, SourceAdapter, clean_html
 logger = logging.getLogger("artikel_mcp.sources.hal")
 
 BASE = "https://api.archives-ouvertes.fr/search/"
-FIELDS = "halId_s,title_s,abstract_s,authFullName_s,doiId_s,producedDateY_i,fileMain_s,uri_s"
+FIELDS = (
+    "halId_s,title_s,abstract_s,authFullName_s,doiId_s,producedDateY_i,fileMain_s,uri_s,"
+    "journalTitle_s,docType_s"
+)
 
 
 def _first(value) -> str | None:
@@ -60,16 +63,25 @@ class HalAdapter(SourceAdapter):
             raise AdapterError("missing title")
         hal_id = doc.get("halId_s")
         source_id = hal_id or doc.get("uri_s") or title
+        doi = _first(doc.get("doiId_s"))
+        publication = (
+            _first(doc.get("journalTitle_s")) or _first(doc.get("docType_s")) or "HAL Open Science"
+        )
+        url = _first(doc.get("uri_s")) or (
+            f"https://doi.org/{doi}" if doi else f"https://hal.science/{source_id}"
+        )
         return PaperRecord(
             source=self.name,
             source_id=source_id,
             title=clean_html(title) or title,
             authors=[a for a in (doc.get("authFullName_s") or []) if a],
-            doi=_first(doc.get("doiId_s")),
+            doi=doi,
+            url=url,
+            publication=publication,
             abstract=clean_html(_first(doc.get("abstract_s"))),
             year=doc.get("producedDateY_i"),
             pdf_url=_first(doc.get("fileMain_s")),
-            extra={"hal_id": hal_id, "uri": doc.get("uri_s")},
+            extra={"hal_id": hal_id, "uri": url, "journal": publication},
         )
 
     def smoke(self, query: str = "deep learning") -> list[PaperRecord]:

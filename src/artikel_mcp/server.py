@@ -17,27 +17,43 @@ logger = logging.getLogger("artikel_mcp")
 SERVER_INSTRUCTIONS = """You are connected to artikel-mcp, an academic research server.
 
 CRITICAL INSTRUCTIONS FOR USING TOOLS:
-1. ALWAYS USE `search_papers` WHEN:
+1. STRICT ANTI-BASH & ANTI-WEBFETCH DIRECTIVE:
+   - NEVER execute bash commands (grep, find, curl, sqlite3, python scripts) OR generic web tools
+     (WebFetch, Exa, Google Search) to retrieve academic papers or parse university journal pages.
+   - Generic WebFetch/curl tools lack browser impersonation and get blocked by HTTP 403!
+   - All scholarly literature workflows MUST use the `search_papers`, `download_paper`,
+     `get_cached_paper`, and `get_search_history` tools.
+
+2. MANDATORY 5-PART PRESENTATION FORMAT:
+   - When presenting search results to the user, you MUST display for EVERY paper:
+     1. **Title**
+     2. **Authors**
+     3. **Publication** (Journal / Conference / Venue, Year)
+     4. **DOI / Link** (Clickable URL)
+     5. **Research Results & Key Findings** (Extracted findings from abstract)
+   - You can directly output the pre-rendered `formatted` field of each record or the
+     `formatted_summary` payload. Never omit any of these 5 fields, even for 50 or 100 papers!
+
+3. ALWAYS USE `search_papers` WHEN:
    - The user asks to find, search, explore, or retrieve academic papers, scientific literature,
      journal articles, or conference proceedings.
    - The user asks for Indonesian academic literature or legal journals (uses the 'garuda' source
      connecting directly to Kemdiktisaintek Garuda).
    - The user asks about computer science/physics/math preprints (arXiv), open-access publications
      (DOAJ), biomedical/life-sciences (Europe PMC / PMC), or cross-publisher DOIs (Crossref).
-   - NEVER hallucinate citations or pretend you searched academic indexes.
-     Always execute `search_papers` first!
+   - You can request specific quantities directly (e.g. 'cari 50 artikel tentang x', limit=50).
 
-2. ALWAYS USE `download_paper` WHEN:
+4. ALWAYS USE `download_paper` WHEN:
    - The user asks to read, analyze, explain, or extract the full text/markdown of a specific
-     paper where a DOI or PDF URL is known.
-   - The tool automatically bypasses paywalls for open-access papers via Unpaywall and converts
-     PDFs into clean, structured Markdown.
+     paper where a DOI, URL (article landing page, OJS, DOAJ, Garuda), or PDF URL is known.
+   - `download_paper` has a built-in Open Journal Systems (OJS) & academic repository engine:
+     it automatically parses OJS article pages (`/article/view/...`), resolves DOI landing pages,
+     locates PDF galleys, bypasses 403 blocks with browser impersonation, and extracts Markdown.
 
-3. USE `get_cached_paper` WHEN:
-   - You need to re-read or inspect full text/markdown of a paper that was previously searched
-     or downloaded in this session.
+5. USE `get_cached_paper` WHEN:
+   - You need to re-read or inspect full text/markdown of a paper previously searched or cached.
 
-4. USE `get_search_history` WHEN:
+6. USE `get_search_history` WHEN:
    - The user asks what topics or queries have been researched previously, or to review past
      search results.
 """
@@ -60,7 +76,8 @@ def create_server(db_path: str | None = None) -> MCPServer:
         description=(
             "Search across global and Indonesian academic indexes (arXiv, CrossRef, Garuda, "
             "DOAJ, EuropePMC, HAL, PMC) and local FTS cache. Automatically persists all results "
-            "and indexes queries into SQLite. USE THIS TOOL whenever the user asks for "
+            "and indexes queries into SQLite. Returns guaranteed title, authors, publication, "
+            "DOI/link, and research results. USE THIS TOOL whenever the user asks for "
             "academic papers, journals, literature reviews, or research on any topic."
         )
     )
@@ -70,8 +87,7 @@ def create_server(db_path: str | None = None) -> MCPServer:
             Field(
                 description=(
                     "The research topic, question, title, keywords, DOI (e.g. '10.1038/...'), "
-                    "or arXiv ID to search for. Conversational phrasing ('tolong cari...', "
-                    "'find papers about...') is automatically cleaned."
+                    "or arXiv ID. You can also specify counts, e.g. 'cari 50 artikel tentang x'."
                 )
             ),
         ],
@@ -89,9 +105,12 @@ def create_server(db_path: str | None = None) -> MCPServer:
         limit: Annotated[
             int,
             Field(
-                description="Maximum number of papers to return (default 20, max 50).",
+                description=(
+                    "Maximum number of papers to return (default 20, max 200). "
+                    "Can also be requested directly in query, e.g. 'cari 50 artikel tentang x'."
+                ),
                 ge=1,
-                le=50,
+                le=200,
             ),
         ] = 20,
         force_refresh: Annotated[
@@ -109,24 +128,35 @@ def create_server(db_path: str | None = None) -> MCPServer:
     @mcp.tool(
         description=(
             "Download an academic paper's PDF and extract clean, structured Markdown. "
-            "Automatically resolves open-access copies via Unpaywall if direct fetch hits "
-            "a paywall or 403. Saves the extracted Markdown permanently into local SQLite for "
-            "instant re-reading and full-text search. USE THIS TOOL whenever you need to read "
-            "or analyze the full content of a paper with a DOI or PDF URL."
+            "Automatically resolves Open Journal Systems (OJS) article pages, DOAJ links, "
+            "Garuda publisher pages, DOI redirect targets, and Unpaywall open-access copies. "
+            "Saves the extracted Markdown permanently into local SQLite for instant re-reading "
+            "and full-text search. USE THIS TOOL whenever you need to read or analyze "
+            "the full content of a paper with a DOI, article URL, or PDF URL."
         )
     )
     def download_paper(
+        url: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Direct URL to the paper's PDF or article landing page (e.g. OJS "
+                    "'/article/view/...', DOAJ link, Garuda publisher page, repository)."
+                )
+            ),
+        ] = None,
         doi: Annotated[
             str | None,
             Field(
                 description=(
-                    "Digital Object Identifier of the paper (e.g. '10.1038/s41586-020-2649-2')."
+                    "Digital Object Identifier of the paper (e.g. '10.1038/s41586-020-2649-2' "
+                    "or 'https://doi.org/...')."
                 )
             ),
         ] = None,
         pdf_url: Annotated[
             str | None,
-            Field(description="Direct URL to the paper's PDF file."),
+            Field(description="Direct URL to the paper's PDF file (synonym for url)."),
         ] = None,
         force_fallback: Annotated[
             bool,
@@ -138,7 +168,9 @@ def create_server(db_path: str | None = None) -> MCPServer:
         ] = False,
     ) -> dict:
         """Download a paper's PDF, return extracted markdown, and persist it to SQLite."""
-        return service_download(cache, doi=doi, pdf_url=pdf_url, force_fallback=force_fallback)
+        return service_download(
+            cache, doi=doi, url=url, pdf_url=pdf_url, force_fallback=force_fallback
+        )
 
     @mcp.tool(
         description=(

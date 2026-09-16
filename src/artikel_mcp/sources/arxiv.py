@@ -59,18 +59,23 @@ class ArxivAdapter(SourceAdapter):
                 pdf = link.get("href")
                 break
         doi = entry.findtext(f"{ARXIV}doi")
+        journal_ref = entry.findtext(f"{ARXIV}journal_ref")
         published = entry.findtext(f"{ATOM}published")
         year = int(published[:4]) if published else None
+        url = f"https://doi.org/{doi}" if doi else f"https://arxiv.org/abs/{source_id}"
+        publication = journal_ref or "arXiv preprint"
         return PaperRecord(
             source=self.name,
             source_id=source_id,
-            title=re_space(title_el.text),
+            title=re_space(title_el.text) or "",
             authors=authors,
             doi=doi,
+            url=url,
+            publication=publication,
             abstract=re_space(entry.findtext(f"{ATOM}summary")),
             year=year,
             pdf_url=pdf,
-            extra={"entry_id": eid.text},
+            extra={"entry_id": eid.text, "journal": publication},
         )
 
     def smoke(self, query: str = "deep learning") -> list[PaperRecord]:

@@ -59,16 +59,25 @@ class EuropePmcAdapter(SourceAdapter):
         authors = []
         if it.get("authorString"):
             authors = [a.strip() for a in it["authorString"].split(",") if a.strip()]
+        doi = it.get("doi")
+        publication = it.get("journalTitle") or "Europe PMC"
+        url = (
+            f"https://doi.org/{doi}"
+            if doi
+            else f"https://europepmc.org/article/{it.get('source', 'MED')}/{it.get('id')}"
+        )
         return PaperRecord(
             source=self.name,
             source_id=source_id,
             title=clean_html(title) or title,
             authors=authors,
-            doi=it.get("doi"),
+            doi=doi,
+            url=url,
+            publication=publication,
             abstract=clean_html(it.get("abstractText")),
             year=int(it["pubYear"]) if it.get("pubYear") else None,
             pdf_url=pdf,
-            extra={"pmcid": it.get("pmcid"), "journal": it.get("journalTitle")},
+            extra={"pmcid": it.get("pmcid"), "journal": publication},
         )
 
     def smoke(self, query: str = "deep learning") -> list[PaperRecord]:

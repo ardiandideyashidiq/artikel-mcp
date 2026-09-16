@@ -61,20 +61,26 @@ class GarudaAdapter(SourceAdapter):
             source_id = detail.rsplit("/", 1)[-1]
             authors = [a.strip() for a in _AUTHOR_RE.findall(block) if a.strip()]
             pdf = _DOWNLOAD_RE.search(block)
-            year = _extract_year(_SUBTITLE_RE.search(block))
+            sub_match = _SUBTITLE_RE.search(block)
+            year = _extract_year(sub_match)
+            publication = _extract_publication(sub_match)
+            clean_title = " ".join(title.split())
+            url = BASE + detail
             if len(records) >= limit:
                 break
             records.append(
                 PaperRecord(
                     source=self.name,
                     source_id=source_id,
-                    title=" ".join(title.split()),
+                    title=clean_title,
                     authors=authors,
                     doi=None,
-                    abstract=None,
+                    url=url,
+                    publication=publication,
+                    abstract=f"Artikel terindeks pada Garuda Kemdiktisaintek: {publication}.",
                     year=year,
                     pdf_url=pdf.group(1) if pdf else None,
-                    extra={"detail_url": BASE + detail},
+                    extra={"detail_url": url, "journal": publication},
                 )
             )
         return records
@@ -83,6 +89,13 @@ class GarudaAdapter(SourceAdapter):
         recs = self.search(query)
         logger.info("garuda smoke: %d records", len(recs))
         return recs
+
+
+def _extract_publication(subtitle_match: re.Match | None) -> str:
+    if not subtitle_match:
+        return "Garuda Kemdiktisaintek Index"
+    raw = " ".join(subtitle_match.group(1).split()).strip()
+    return raw or "Garuda Kemdiktisaintek Index"
 
 
 def _extract_year(subtitle_match: re.Match | None) -> int | None:

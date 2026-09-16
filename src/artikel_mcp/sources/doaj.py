@@ -45,6 +45,11 @@ class DoajAdapter(SourceAdapter):
         if not title:
             raise AdapterError("missing title")
         doi = bi.get("doi")
+        if not doi:
+            for ident in bi.get("identifier") or []:
+                if (ident.get("type") or "").lower() == "doi" and ident.get("id"):
+                    doi = ident["id"].strip()
+                    break
         source_id = doi or it.get("id") or title
         pdf = None
         fulltext = None
@@ -57,17 +62,25 @@ class DoajAdapter(SourceAdapter):
                 fulltext = url
         authors = [a.get("name") for a in bi.get("author") or [] if a.get("name")]
         year = bi.get("year")
+        publication = bi.get("journal", {}).get("title") or "DOAJ Open Access Journal"
+        url = (
+            f"https://doi.org/{doi}"
+            if doi
+            else (fulltext or f"https://doaj.org/article/{source_id}")
+        )
         return PaperRecord(
             source=self.name,
             source_id=source_id,
             title=clean_html(title) or title,
             authors=authors,
             doi=doi,
+            url=url,
+            publication=publication,
             abstract=clean_html(bi.get("abstract")),
             year=year,
             pdf_url=pdf,
             extra={
-                "journal": bi.get("journal", {}).get("title"),
+                "journal": publication,
                 "volume": bi.get("journal", {}).get("volume"),
                 "fulltext_url": fulltext,
             },

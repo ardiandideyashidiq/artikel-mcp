@@ -76,16 +76,24 @@ class PmcAdapter(SourceAdapter):
         doi = _extract_doi(article_ids, entry)
         pdf = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/" if pmcid else None
         source_id = pmcid if pmcid else uid
+        publication = entry.get("fulljournalname") or entry.get("source") or "PubMed Central"
+        url = (
+            f"https://doi.org/{doi}"
+            if doi
+            else f"https://www.ncbi.nlm.nih.gov/pmc/articles/{source_id}/"
+        )
         return PaperRecord(
             source=self.name,
             source_id=source_id,
             title=clean_html(title) or title,
             authors=[a["name"] for a in entry.get("authors", [])],
             doi=doi,
-            abstract=None,
+            url=url,
+            publication=publication,
+            abstract=f"Artikel terindeks di PubMed Central: {publication}.",
             year=int(str(entry.get("pubdate", "")[:4])) if entry.get("pubdate") else None,
             pdf_url=pdf,
-            extra={"pmid": article_ids.get("pmid")},
+            extra={"pmid": article_ids.get("pmid"), "journal": publication},
         )
 
     def smoke(self, query: str = "deep learning") -> list[PaperRecord]:

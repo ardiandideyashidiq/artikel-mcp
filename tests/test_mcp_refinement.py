@@ -220,3 +220,86 @@ def test_mcp_server_tool_calls_and_resources(tmp_path, monkeypatch):
         assert len(q_data) >= 1
 
     asyncio.run(run())
+
+
+def test_natural_query_limit_extraction():
+    from artikel_mcp.query_broker import extract_query_limit
+
+    q1, lim1 = extract_query_limit("cari 50 artikel tentang machine learning")
+    assert lim1 == 50
+    assert q1 == "machine learning"
+
+    q2, lim2 = extract_query_limit("tolong carikan 100 jurnal tentang perubahan iklim")
+    assert lim2 == 100
+    assert q2 == "perubahan iklim"
+
+    q3, lim3 = extract_query_limit("find 30 papers on quantum computing")
+    assert lim3 == 30
+    assert q3 == "quantum computing"
+
+    q4, lim4 = extract_query_limit("deep learning sebanyak 75")
+    assert lim4 == 75
+    assert q4 == "deep learning"
+
+    q5, lim5 = extract_query_limit("status hukum deepfake di indonesia")
+    assert lim5 is None
+    assert q5 == "status hukum deepfake di indonesia"
+
+
+def test_mandatory_5_fields_and_formatted_summary(tmp_path):
+    from artikel_mcp.cache import PaperCache
+    from artikel_mcp.models import PaperRecord
+    from artikel_mcp.service import search_papers
+
+    db = tmp_path / "fields.db"
+    cache = PaperCache(db)
+
+    # Insert a paper with abstract
+    rec = PaperRecord(
+        source="arxiv",
+        source_id="2402.12345",
+        title="Scaling Transformer Language Models",
+        authors=["Alice Smith", "Bob Jones"],
+        doi="10.1234/scaling",
+        publication="NeurIPS 2026",
+        abstract=(
+            "We investigate scaling behavior. The results demonstrate that models achieve 95%."
+        ),
+        year=2026,
+    )
+    cache.upsert(rec)
+
+    # Search
+    res = search_papers(cache, "cari 50 artikel tentang scaling", sources=["local"])
+    assert res["from_local"] is True
+    assert res["count"] == 1
+    assert "formatted_summary" in res
+
+    p = res["records"][0]
+    # Guarantee 5 fields
+    assert p["title"] == "Scaling Transformer Language Models"
+    assert p["authors"] == ["Alice Smith", "Bob Jones"]
+    assert "Alice Smith" in p["authors_str"]
+    assert p["publication"] == "NeurIPS 2026"
+    assert p["url"] == "https://doi.org/10.1234/scaling"
+    assert "results demonstrate" in p["research_results"]
+
+    # Guarantee formatted block
+    assert "Scaling Transformer Language Models" in p["formatted"]
+    assert "NeurIPS 2026" in p["formatted"]
+    assert "https://doi.org/10.1234/scaling" in p["formatted"]
+    assert p["formatted"] in res["formatted_summary"]
+
+    cache.close()
+
+
+def test_schema_supports_200_limit(tmp_path):
+    srv = create_server(db_path=str(tmp_path / "limit_test.db"))
+
+    async def run():
+        tools = await srv.list_tools()
+        search_tool = next(t for t in tools if t.name == "search_papers")
+        limit_prop = search_tool.input_schema["properties"]["limit"]
+        assert limit_prop["maximum"] == 200
+
+    asyncio.run(run())

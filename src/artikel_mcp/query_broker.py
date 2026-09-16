@@ -98,6 +98,24 @@ _CONVERSATIONAL_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+_QUERY_LIMIT_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"(?:tolong\s+)?(?:carikan|cari|temukan|find|search(?:\s+for)?|get|show|list)\s+"
+    r"(\d{1,3})\s+"
+    r"(?:artikel|jurnal|paper|papers|articles|publikasi|studi)?\s*"
+    r"(?:tentang|mengenai|terkait|soal|on|about|for)?|"
+    r"(\d{1,3})\s+"
+    r"(?:artikel|jurnal|paper|papers|articles|publikasi)\s*"
+    r"(?:tentang|mengenai|terkait|soal|on|about|for)?"
+    r")\s+",
+    re.IGNORECASE,
+)
+
+_QUERY_LIMIT_SUFFIX_RE = re.compile(
+    r"\s+(?:sebanyak|jumlah|limit)\s*[:=]?\s*(\d{1,3})\s*$",
+    re.IGNORECASE,
+)
+
 _DOI_RE = re.compile(
     r"(?:https?://(?:dx\.)?doi\.org/)?(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", re.IGNORECASE
 )
@@ -107,12 +125,33 @@ _ARXIV_ID_RE = re.compile(
 )
 
 
-def clean_conversational_query(query: str) -> str:
-    """Strip conversational filler like 'tolong carikan jurnal tentang'."""
+def extract_query_limit(query: str) -> tuple[str, int | None]:
+    """Extract requested paper count (e.g. 'cari 50 artikel tentang x' -> ('x', 50))."""
     q = query.strip()
+    limit: int | None = None
+
+    m_prefix = _QUERY_LIMIT_PREFIX_RE.match(q)
+    if m_prefix:
+        num_str = m_prefix.group(1) or m_prefix.group(2)
+        if num_str:
+            limit = max(1, min(200, int(num_str)))
+            q = q[m_prefix.end() :].strip()
+
+    m_suffix = _QUERY_LIMIT_SUFFIX_RE.search(q)
+    if m_suffix:
+        num_str = m_suffix.group(1)
+        if num_str:
+            limit = max(1, min(200, int(num_str)))
+            q = q[: m_suffix.start()].strip()
+
     q = _CONVERSATIONAL_PREFIX_RE.sub("", q).strip()
-    # strip wrapping quotes or trailing question marks
     q = re.sub(r'^[“"\'`]+|[”"\'`?]+$', "", q).strip()
+    return q or query.strip(), limit
+
+
+def clean_conversational_query(query: str) -> str:
+    """Strip conversational filler like 'tolong carikan jurnal tentang' or 'cari 50 artikel'."""
+    q, _ = extract_query_limit(query)
     return q or query.strip()
 
 

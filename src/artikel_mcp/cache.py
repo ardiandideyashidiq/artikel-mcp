@@ -52,6 +52,9 @@ CREATE TABLE IF NOT EXISTS papers (
     year        INTEGER,
     pdf_url     TEXT,
     markdown    TEXT,
+    url         TEXT,
+    publication TEXT,
+    research_results TEXT,
     raw_json    TEXT,
     fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -125,7 +128,13 @@ class PaperCache:
         cols = [r[1] for r in self._conn.execute("PRAGMA table_info(papers)").fetchall()]
         if "markdown" not in cols:
             self._conn.execute("ALTER TABLE papers ADD COLUMN markdown TEXT")
-            self._conn.commit()
+        if "url" not in cols:
+            self._conn.execute("ALTER TABLE papers ADD COLUMN url TEXT")
+        if "publication" not in cols:
+            self._conn.execute("ALTER TABLE papers ADD COLUMN publication TEXT")
+        if "research_results" not in cols:
+            self._conn.execute("ALTER TABLE papers ADD COLUMN research_results TEXT")
+        self._conn.commit()
 
         fts_cols = [r[1] for r in self._conn.execute("PRAGMA table_info(papers_fts)").fetchall()]
         if "markdown" not in fts_cols:
@@ -195,6 +204,9 @@ class PaperCache:
                 "abstract": record.abstract,
                 "year": record.year,
                 "pdf_url": record.pdf_url,
+                "url": record.url,
+                "publication": record.publication,
+                "research_results": record.research_results,
                 "extra": record.extra,
             },
             ensure_ascii=False,
@@ -203,8 +215,8 @@ class PaperCache:
             """
             INSERT INTO papers
                 (dedup_key, source, source_id, doi, title, authors,
-                 abstract, year, pdf_url, markdown, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 abstract, year, pdf_url, markdown, url, publication, research_results, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(dedup_key) DO UPDATE SET
                 source=excluded.source,
                 source_id=excluded.source_id,
@@ -215,6 +227,9 @@ class PaperCache:
                 year=excluded.year,
                 pdf_url=excluded.pdf_url,
                 markdown=coalesce(excluded.markdown, papers.markdown),
+                url=coalesce(excluded.url, papers.url),
+                publication=coalesce(excluded.publication, papers.publication),
+                research_results=coalesce(excluded.research_results, papers.research_results),
                 raw_json=excluded.raw_json,
                 updated_at=datetime('now')
             """,
@@ -229,6 +244,9 @@ class PaperCache:
                 record.year,
                 record.pdf_url,
                 record.markdown,
+                record.url,
+                record.publication,
+                record.research_results,
                 raw,
             ),
         )
@@ -398,14 +416,21 @@ class PaperCache:
         authors = json.loads(row["authors"] or "[]")
         raw = json.loads(row["raw_json"] or "{}")
         extra = raw.get("extra") or {}
-        markdown = row["markdown"] if "markdown" in set(row.keys()) else None
+        row_keys = set(row.keys())
+        markdown = row["markdown"] if "markdown" in row_keys else None
+        url = row["url"] if "url" in row_keys else None
+        publication = row["publication"] if "publication" in row_keys else None
+        research_results = row["research_results"] if "research_results" in row_keys else None
         return PaperRecord(
             source=row["source"],
             source_id=row["source_id"],
             title=row["title"],
             authors=authors,
             doi=row["doi"],
+            url=url,
+            publication=publication,
             abstract=row["abstract"],
+            research_results=research_results,
             year=row["year"],
             pdf_url=row["pdf_url"],
             markdown=markdown,

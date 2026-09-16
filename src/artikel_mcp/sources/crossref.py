@@ -27,7 +27,7 @@ class CrossrefAdapter(SourceAdapter):
                 params={
                     "query": query,
                     "rows": str(limit),
-                    "select": "DOI,title,author,abstract,issued,link,URL",
+                    "select": "DOI,title,author,abstract,issued,link,URL,container-title,publisher",
                 },
             )
         except HttpError as e:
@@ -63,16 +63,21 @@ class CrossrefAdapter(SourceAdapter):
                 link = ln.get("URL")
                 break
         doi = it.get("DOI")
+        container = (it.get("container-title") or [None])[0]
+        publication = container or it.get("publisher") or "Crossref Publication"
+        url = it.get("URL") or (f"https://doi.org/{doi}" if doi else None)
         return PaperRecord(
             source=self.name,
             source_id=doi or title,
             title=clean_html(title) or title,
             authors=authors,
             doi=doi,
+            url=url,
+            publication=publication,
             abstract=clean_html(it.get("abstract")),
             year=year,
             pdf_url=link,
-            extra={"url": it.get("URL")},
+            extra={"url": it.get("URL"), "journal": publication},
         )
 
     def smoke(self, query: str = "deep learning") -> list[PaperRecord]:
