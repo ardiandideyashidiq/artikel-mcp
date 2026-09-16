@@ -40,7 +40,7 @@
 - [x] 6.1 Register `search_papers` tool returning cache-first results (local FTS hit served without upstream) and verify via MCP client test: seeded record matches without network, unknown term triggers upstream
 - [x] 6.2 Register `download_paper` tool (DOI and/or pdf_url; direct then Unpaywall fallback) and verify an end-to-end test downloads a real OA PDF and extracts markdown with no exceptions
 - [x] 6.3 Verify all adapters persist every fetched record to the cache on miss (never-fetch-twice) and that re-running search for the same query hits FTS only — assert zero upstream calls on second run
-- [ ] 6.4 Run `uv run ruff` lint clean and a final live smoke of all seven sources + download; commit the assembled change set with a conventional message
+- [x] 6.4 Run `uv run ruff` lint clean and a final live smoke of all seven sources + download; commit the assembled change set with a conventional message
 
 ## 7. Docs & polish
 
