@@ -4,10 +4,14 @@ These use a temp sqlite cache and the "local" pseudo-source so no upstream
 network calls are made; the never-fetch-twice check counts upstream calls.
 """
 
+import asyncio
+import time
+
 import pytest
 
 from artikel_mcp.cache import PaperCache
 from artikel_mcp.models import PaperRecord
+from artikel_mcp.server import create_server
 from artikel_mcp.service import search_papers
 
 
@@ -107,3 +111,53 @@ def test_mcp_tool_search_papers_cross_thread(tmp_path):
     result = asyncio.run(run())
     assert result is not None
     assert result.is_error is False
+
+
+def test_parallel_search_papers_with_adapted_queries(tmp_path, monkeypatch):
+    """Parallel fan-out reaches each adapter and adapts queries per-source."""
+    import threading
+
+    from artikel_mcp.sources import registry
+
+    queries_received: dict[str, str] = {}
+    lock = threading.Lock()
+
+    class CrossrefSpy:
+        name = "crossref"
+
+        def search(self, query, limit=20):
+            with lock:
+                queries_received["crossref"] = query
+            return [
+                PaperRecord(source="crossref", source_id="1", title="Crossref Hit")
+            ]
+
+    class SlowSpy:
+        name = "slow"
+
+        def search(self, query, limit=20):
+            time.sleep(0.3)
+            with lock:
+                queries_received["slow"] = query
+            return [PaperRecord(source="slow", source_id="2", title="Slow Hit")]
+
+    monkeypatch.setitem(registry._REGISTRY, "crossref", CrossrefSpy)
+    monkeypatch.setitem(registry._REGISTRY, "slow", SlowSpy)
+    db = tmp_path / "parallel.db"
+    srv = create_server(db_path=str(db))
+    t0 = time.monotonic()
+    res = asyncio.run(
+        srv.call_tool(
+            "search_papers",
+            {"query": "status hukum deepfake di indonesia", "sources": ["crossref", "slow"]},
+        )
+    )
+    elapsed = time.monotonic() - t0
+    assert res is not None
+    assert res.is_error is False
+    # parallel: finished well under 0.6s (sum of sleeps)
+    assert elapsed < 0.5
+    # crossref received adapted query (expanded, stopwords stripped)
+    assert "hukum OR law OR legal" in queries_received["crossref"]
+    # slow received raw query (broker fallback for registry-only adapters)
+    assert queries_received["slow"] == "status hukum deepfake di indonesia"

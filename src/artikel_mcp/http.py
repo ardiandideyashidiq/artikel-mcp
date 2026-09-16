@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 from curl_cffi import requests as crequests
 
@@ -84,11 +85,13 @@ class HttpClient:
         return resp if raw else resp.content
 
 
-_default: HttpClient | None = None
+_local = threading.local()
 
 
 def get_client() -> HttpClient:
-    global _default
-    if _default is None:
-        _default = HttpClient()
-    return _default
+    """Return a per-thread HttpClient (curl_cffi Session is not thread-safe)."""
+    client = getattr(_local, "default", None)
+    if client is None:
+        client = HttpClient()
+        _local.default = client
+    return client
