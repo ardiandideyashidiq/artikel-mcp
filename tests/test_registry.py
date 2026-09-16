@@ -83,6 +83,7 @@ class HungAdapter:
     ponytail: in production the HttpClient timeout bounds the real wait;
                this adapter simulates that failure path directly.
     """
+
     name = "hung"
 
     def search(self, query, limit=20):

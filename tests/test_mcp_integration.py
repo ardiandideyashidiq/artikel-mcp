@@ -128,9 +128,7 @@ def test_parallel_search_papers_with_adapted_queries(tmp_path, monkeypatch):
         def search(self, query, limit=20):
             with lock:
                 queries_received["crossref"] = query
-            return [
-                PaperRecord(source="crossref", source_id="1", title="Crossref Hit")
-            ]
+            return [PaperRecord(source="crossref", source_id="1", title="Crossref Hit")]
 
     class SlowSpy:
         name = "slow"

@@ -17,13 +17,47 @@ from collections.abc import Callable
 
 # Indonesian + English low-information words, pruned before expansion.
 _STOPWORDS = {
-    "status", "di", "yang", "dan", "dari", "tentang", "pada", "untuk",
-    "dengan", "dalam", "sebuah", "the", "of", "and", "a", "an", "in", "on",
-    "for", "about", "with",
+    "status",
+    "di",
+    "yang",
+    "dan",
+    "dari",
+    "tentang",
+    "pada",
+    "untuk",
+    "dengan",
+    "dalam",
+    "sebuah",
+    "ke",
+    "oleh",
+    "ini",
+    "itu",
+    "atau",
+    "sebagai",
+    "the",
+    "of",
+    "and",
+    "a",
+    "an",
+    "in",
+    "on",
+    "for",
+    "about",
+    "with",
+    "by",
+    "at",
+    "from",
+    "as",
+    "to",
+    "is",
+    "are",
+    "was",
+    "were",
 }
 
-# Indonesian -> English synonym expansion, applied as "id OR en1 OR en2".
+# Multi-domain Indonesian -> English synonym expansion, applied as "id OR en1 OR en2".
 _SYNONYMS = {
+    # Legal & governance
     "hukum": "hukum OR law OR legal",
     "pidana": "pidana OR criminal",
     "perlindungan": "perlindungan OR protection",
@@ -32,9 +66,66 @@ _SYNONYMS = {
     "penyebaran": "penyebaran OR dissemination",
     "penipuan": "penipuan OR fraud",
     "pornografi": "pornografi OR pornography",
+    # Computer science, AI & data
+    "kecerdasan": "kecerdasan OR intelligence",
+    "buatan": "buatan OR artificial",
+    "pembelajaran": "pembelajaran OR learning",
+    "mesin": "mesin OR machine",
+    "jaringan": "jaringan OR network",
+    "citra": "citra OR image",
+    "pengenalan": "pengenalan OR recognition",
+    "keamanan": "keamanan OR security",
+    # Health, science & environment
+    "kesehatan": "kesehatan OR health OR healthcare",
+    "medis": "medis OR medical",
+    "penyakit": "penyakit OR disease",
+    "deteksi": "deteksi OR detection",
+    "pertanian": "pertanian OR agriculture",
+    "lingkungan": "lingkungan OR environment",
+    "pendidikan": "pendidikan OR education",
+    "ekonomi": "ekonomi OR economy OR economic",
 }
 
 _TOKEN_RE = re.compile(r"\w+")
+
+_CONVERSATIONAL_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"(?:tolong\s+)?(?:carikan|cari)\s+(?:beberapa\s+)?(?:jurnal|artikel|paper|penelitian|studi)?\s*(?:tentang|mengenai|terkait|soal)?|"
+    r"(?:jurnal|artikel|paper|penelitian|studi)\s+(?:tentang|mengenai|terkait)|"
+    r"(?:please\s+)?(?:find|search(?:\s+for)?|look\s+up)\s+(?:papers|articles|research|literature|studies)?\s*(?:about|on|regarding)?|"
+    r"(?:papers|articles|research|literature)\s+(?:about|on|regarding)"
+    r")\s+",
+    re.IGNORECASE,
+)
+
+_DOI_RE = re.compile(
+    r"(?:https?://(?:dx\.)?doi\.org/)?(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", re.IGNORECASE
+)
+_ARXIV_ID_RE = re.compile(
+    r"(?:https?://arxiv\.org/(?:abs|pdf)/)?(?:arxiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)",
+    re.IGNORECASE,
+)
+
+
+def clean_conversational_query(query: str) -> str:
+    """Strip conversational filler like 'tolong carikan jurnal tentang'."""
+    q = query.strip()
+    q = _CONVERSATIONAL_PREFIX_RE.sub("", q).strip()
+    # strip wrapping quotes or trailing question marks
+    q = re.sub(r'^[“"\'`]+|[”"\'`?]+$', "", q).strip()
+    return q or query.strip()
+
+
+def extract_identifier(query: str) -> dict[str, str] | None:
+    """Check if query directly specifies a DOI or arXiv identifier."""
+    stripped = query.strip()
+    doi_m = _DOI_RE.search(stripped)
+    if doi_m:
+        return {"type": "doi", "value": doi_m.group(1)}
+    arxiv_m = _ARXIV_ID_RE.search(stripped)
+    if arxiv_m:
+        return {"type": "arxiv", "value": arxiv_m.group(1)}
+    return None
 
 
 def _expand(token: str) -> str:
@@ -43,9 +134,10 @@ def _expand(token: str) -> str:
 
 def _expanded_query(query: str) -> str:
     """Strip stopwords and expand synonyms to an id/en-safe keyword string."""
-    tokens = [t for t in _TOKEN_RE.findall(query.lower()) if t not in _STOPWORDS]
+    cleaned = clean_conversational_query(query)
+    tokens = [t for t in _TOKEN_RE.findall(cleaned.lower()) if t not in _STOPWORDS]
     if not tokens:
-        return query
+        return cleaned
     return " ".join(_expand(t) for t in tokens)
 
 
@@ -59,8 +151,8 @@ _TRANSFORMS: dict[str, Callable[[str], str]] = {
     "europepmc": _expanded_query,
     "hal": _expanded_query,
     "pmc": _expanded_query,
-    # garuda: Indonesian corpus; keep the user's raw tokens
-    "garuda": lambda q: q,
+    # garuda: Indonesian corpus; keep user's search keywords without filler
+    "garuda": clean_conversational_query,
 }
 
 

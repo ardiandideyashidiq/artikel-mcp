@@ -16,6 +16,7 @@ class PaperRecord:
     abstract: str | None = None
     year: int | None = None
     pdf_url: str | None = None
+    markdown: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def dedup_key(self) -> str:
