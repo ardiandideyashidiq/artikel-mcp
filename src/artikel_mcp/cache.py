@@ -78,6 +78,8 @@ CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE ON papers BEGIN
 END;
 """
 
+_FTS_OPERATORS = frozenset({"OR", "AND", "NOT"})
+
 
 class PaperCache:
     def __init__(self, path: str | Path | None = None):
@@ -157,9 +159,22 @@ class PaperCache:
         logger.debug("cache hit %s", dedup_key)
         return self._row_to_record(row)
 
-    def search(self, query: str, limit: int = 50) -> list[PaperRecord]:
-        """Full-text search over title + abstract."""
-        safe_q = " ".join(f'"{t}"' for t in query.split())
+    def search(
+        self, query: str, limit: int = 50, adapted: bool = False
+    ) -> list[PaperRecord]:
+        """Full-text search over title + abstract.
+
+        With adapted=False (default) each whitespace token becomes an exact
+        quoted phrase, AND-joined. With adapted=True the query is a
+        broker-adapted keyword string: FTS5 operator words (OR/AND/NOT) are
+        dropped and every remaining term is matched as a prefix (tok*),
+        OR-joined, so inflected or partial terms still recall cached records.
+        """
+        if adapted:
+            terms = [t for t in query.split() if t.upper() not in _FTS_OPERATORS]
+            safe_q = " OR ".join(f"{t}*" for t in terms) if terms else query
+        else:
+            safe_q = " ".join(f'"{t}"' for t in query.split())
         logger.debug("fts query: %s", safe_q)
         rows = self._conn.execute(
             """

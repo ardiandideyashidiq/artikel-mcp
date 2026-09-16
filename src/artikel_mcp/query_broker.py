@@ -64,6 +64,16 @@ _TRANSFORMS: dict[str, Callable[[str], str]] = {
 }
 
 
+def local_adapt(query: str) -> str:
+    """Return the broker-adapted keyword string for the local FTS cache.
+
+    Same stopword/synonym transformation as the arxiv path, without
+    requiring a source name. The consumer (PaperCache.search with
+    adapted=True) prefixes each token for FTS5 matching.
+    """
+    return _expanded_query(query)
+
+
 def adapt(query: str, source: str) -> str:
     """Return the query string a given source should receive.
 

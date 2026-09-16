@@ -56,3 +56,25 @@ def test_get_by_key(cache):
     cache.upsert(r)
     assert cache.get_by_key("doaj:d42") is not None
     assert cache.get_by_key("doaj:missing") is None
+
+
+def test_local_fts_recall_multi_token(cache):
+    cache.upsert(
+        PaperRecord(
+            source="arxiv",
+            source_id="a1",
+            title="Deepfake Fraud in Indonesia",
+            abstract="survey of deepfake fraud detection in southeast Asia",
+        )
+    )
+    cache.upsert(
+        PaperRecord(
+            source="arxiv",
+            source_id="a2",
+            title="Legal Status of Deepfakes",
+            abstract="regulation and legal analysis of deepfakes",
+        )
+    )
+    hits = cache.search("status hukum deepfake di indonesia", adapted=True)
+    assert len(hits) == 2
+    assert {h.source_id for h in hits} == {"a1", "a2"}

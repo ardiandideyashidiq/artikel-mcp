@@ -13,6 +13,7 @@ from artikel_mcp.pdf import (
     extract_markdown,
     resolve_pdf_with_unpaywall,
 )
+from artikel_mcp.query_broker import local_adapt
 from artikel_mcp.sources import registry
 
 logger = logging.getLogger("artikel_mcp.service")
@@ -40,7 +41,7 @@ def search_papers(
     local_only = "local" in requested and len(requested) == 1
 
     # 1) always try the local FTS pass first (cache-first contract)
-    hits = cache.search(query, limit=limit)
+    hits = cache.search(local_adapt(query), limit=limit, adapted=True)
     for r in hits:
         docs.append(_as_dict(r))
     if docs:
