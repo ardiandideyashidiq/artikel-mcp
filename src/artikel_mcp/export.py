@@ -356,6 +356,12 @@ def render_latex(
     custom_template: str | None = None,
 ) -> str:
     """Render a PaperRecord into a complete LaTeX document string."""
+    if custom_template:
+        lower_t = custom_template.lower()
+        forbidden = (r"\write18", r"\input{", r"\openin", r"\read", r"\csname")
+        if any(bad in lower_t for bad in forbidden):
+            raise ValueError("custom_template contains prohibited LaTeX directive for security")
+
     template_str = custom_template or TEMPLATES.get(template_name, TEMPLATES["academic"])
 
     # Prepare escaped values
@@ -424,6 +430,7 @@ def compile_latex_to_pdf(
             available_compiler,
             "-interaction=nonstopmode",
             "-halt-on-error",
+            "-no-shell-escape",
             "document.tex",
         ]
 
@@ -466,9 +473,9 @@ def export_paper(
 ) -> dict:
     """Export a paper record to LaTeX source (.tex) and optionally compile to PDF."""
     target_dir = (
-        Path(output_dir)
+        Path(output_dir).resolve()
         if output_dir
-        else Path.home() / ".local" / "share" / "artikel-mcp" / "exports"
+        else (Path.home() / ".local" / "share" / "artikel-mcp" / "exports").resolve()
     )
     target_dir.mkdir(parents=True, exist_ok=True)
 

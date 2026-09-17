@@ -25,7 +25,7 @@ from pathlib import Path
 
 logger = logging.getLogger("artikel_mcp.proxy_engine")
 
-DEFAULT_VLESS_URL = "https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/refs/heads/main/vless_configs.txt"
+DEFAULT_VLESS_URL = os.getenv("ARTIKEL_MCP_VLESS_URL", "")
 
 
 @dataclass
@@ -467,8 +467,13 @@ class LocalSocks5Server:
                 ssl_ctx = None
                 if node.security in ("tls", "reality"):
                     ssl_ctx = ssl.create_default_context()
-                    ssl_ctx.check_hostname = False
-                    ssl_ctx.verify_mode = ssl.CERT_NONE
+                    insecure = os.getenv("ARTIKEL_MCP_PROXY_INSECURE_TLS", "0") == "1"
+                    if insecure:
+                        ssl_ctx.check_hostname = False
+                        ssl_ctx.verify_mode = ssl.CERT_NONE
+                    else:
+                        ssl_ctx.check_hostname = bool(node.sni)
+                        ssl_ctx.verify_mode = ssl.CERT_REQUIRED
 
                 remote_reader, remote_writer = await asyncio.wait_for(
                     asyncio.open_connection(

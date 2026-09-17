@@ -27,6 +27,10 @@ class PdfResult:
     via_unpaywall: bool = False
 
 
+MAX_PDF_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_PDF_PAGES = 100
+
+
 def download_pdf(url: str, client: HttpClient | None = None) -> tuple[bytes, bool]:
     """Download PDF bytes via impersonating client.
 
@@ -34,6 +38,10 @@ def download_pdf(url: str, client: HttpClient | None = None) -> tuple[bytes, boo
     """
     client = client or get_client()
     body = client.get(url, timeout=120)
+    if len(body) > MAX_PDF_BYTES:
+        raise PdfError(
+            f"PDF download exceeds max allowed limit ({len(body)} > {MAX_PDF_BYTES} bytes)"
+        )
     if not body.startswith(PDF_MAGIC):
         logger.warning("non-PDF magic bytes from %s", url)
         raise PdfError(f"expected PDF from {url}, got non-PDF content")
@@ -125,22 +133,30 @@ def extract_markdown(
     return md, True
 
 
-def _extract_with_pymupdf(data: bytes) -> str:
+def _extract_with_pymupdf(data: bytes, max_pages: int = MAX_PDF_PAGES) -> str:
     import pymupdf
 
     doc = pymupdf.open(stream=data, filetype="pdf")
-    pages = [page.get_text() for page in doc]
-    doc.close()
+    pages = []
+    try:
+        for idx, page in enumerate(doc):
+            if idx >= max_pages:
+                logger.info("reached max page extraction limit (%d pages)", max_pages)
+                break
+            pages.append(page.get_text())
+    finally:
+        doc.close()
     return clean_text("\n\n".join(pages))
 
 
-def _extract_with_pymupdf4llm(data: bytes) -> str:
+def _extract_with_pymupdf4llm(data: bytes, max_pages: int = MAX_PDF_PAGES) -> str:
     import pymupdf
     import pymupdf4llm
 
     doc = pymupdf.open(stream=data, filetype="pdf")
     try:
-        return pymupdf4llm.to_markdown(doc)
+        page_range = list(range(min(len(doc), max_pages)))
+        return pymupdf4llm.to_markdown(doc, pages=page_range)
     finally:
         doc.close()
 

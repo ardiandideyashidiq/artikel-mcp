@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from artikel_mcp.citation import parse_author_name
 from artikel_mcp.models import PaperRecord
 
 logger = logging.getLogger("artikel_mcp.cache")
@@ -56,9 +59,15 @@ CREATE TABLE IF NOT EXISTS papers (
     publication TEXT,
     research_results TEXT,
     raw_json    TEXT,
+    citekey     TEXT,
     fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_papers_doi ON papers(doi);
+CREATE INDEX IF NOT EXISTS idx_papers_citekey ON papers(citekey);
+CREATE INDEX IF NOT EXISTS idx_papers_url ON papers(url);
+CREATE INDEX IF NOT EXISTS idx_papers_pdf_url ON papers(pdf_url);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
     title, abstract, markdown, content='papers', content_rowid='rowid'
@@ -114,14 +123,27 @@ class PaperCache:
     def __init__(self, path: str | Path | None = None):
         self.path = Path(path) if path else default_db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # check_same_thread=False: MCP runs tool calls on a worker thread.
-        # sqlite serializes writes via its internal mutex; short transactions
-        # and a single stdio user make cross-thread reuse safe enough.
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
-        self._migrate()
+        with self._lock:
+            try:
+                self._conn.execute("PRAGMA journal_mode=WAL;")
+                self._conn.execute("PRAGMA busy_timeout=5000;")
+            except Exception as e:
+                logger.debug("Failed to set PRAGMA journal_mode: %s", e)
+            self._conn.executescript(_SCHEMA)
+            self._migrate()
         logger.debug("cache opened at %s", self.path)
+
+    def _extract_citekey(self, record: PaperRecord) -> str:
+        if record.authors:
+            last = parse_author_name(record.authors[0]).last
+            clean_last = re.sub(r"\W+", "", last).lower()
+        else:
+            clean_last = "item"
+        year = str(record.year) if record.year else "nodate"
+        return f"{clean_last}{year}"
 
     def _migrate(self) -> None:
         """Ensure columns and FTS definition match current version."""
@@ -134,6 +156,9 @@ class PaperCache:
             self._conn.execute("ALTER TABLE papers ADD COLUMN publication TEXT")
         if "research_results" not in cols:
             self._conn.execute("ALTER TABLE papers ADD COLUMN research_results TEXT")
+        if "citekey" not in cols:
+            self._conn.execute("ALTER TABLE papers ADD COLUMN citekey TEXT")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_papers_citekey ON papers(citekey)")
         self._conn.commit()
 
         fts_cols = [r[1] for r in self._conn.execute("PRAGMA table_info(papers_fts)").fetchall()]
@@ -189,11 +214,13 @@ class PaperCache:
             self._conn.commit()
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     def upsert(self, record: PaperRecord) -> str:
         """Insert or update a record; returns its dedup key."""
         key = record.dedup_key()
+        citekey = self._extract_citekey(record)
         raw = json.dumps(
             {
                 "source": record.source,
@@ -211,46 +238,50 @@ class PaperCache:
             },
             ensure_ascii=False,
         )
-        self._conn.execute(
-            """
-            INSERT INTO papers
-                (dedup_key, source, source_id, doi, title, authors,
-                 abstract, year, pdf_url, markdown, url, publication, research_results, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(dedup_key) DO UPDATE SET
-                source=excluded.source,
-                source_id=excluded.source_id,
-                doi=excluded.doi,
-                title=excluded.title,
-                authors=excluded.authors,
-                abstract=excluded.abstract,
-                year=excluded.year,
-                pdf_url=excluded.pdf_url,
-                markdown=coalesce(excluded.markdown, papers.markdown),
-                url=coalesce(excluded.url, papers.url),
-                publication=coalesce(excluded.publication, papers.publication),
-                research_results=coalesce(excluded.research_results, papers.research_results),
-                raw_json=excluded.raw_json,
-                updated_at=datetime('now')
-            """,
-            (
-                key,
-                record.source,
-                record.source_id,
-                record.doi,
-                record.title,
-                json.dumps(record.authors, ensure_ascii=False),
-                record.abstract,
-                record.year,
-                record.pdf_url,
-                record.markdown,
-                record.url,
-                record.publication,
-                record.research_results,
-                raw,
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO papers
+                    (dedup_key, source, source_id, doi, title, authors,
+                     abstract, year, pdf_url, markdown, url, publication,
+                     research_results, raw_json, citekey)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(dedup_key) DO UPDATE SET
+                    source=excluded.source,
+                    source_id=excluded.source_id,
+                    doi=excluded.doi,
+                    title=excluded.title,
+                    authors=excluded.authors,
+                    abstract=excluded.abstract,
+                    year=excluded.year,
+                    pdf_url=excluded.pdf_url,
+                    markdown=coalesce(excluded.markdown, papers.markdown),
+                    url=coalesce(excluded.url, papers.url),
+                    publication=coalesce(excluded.publication, papers.publication),
+                    research_results=coalesce(excluded.research_results, papers.research_results),
+                    raw_json=excluded.raw_json,
+                    citekey=coalesce(excluded.citekey, papers.citekey),
+                    updated_at=datetime('now')
+                """,
+                (
+                    key,
+                    record.source,
+                    record.source_id,
+                    record.doi,
+                    record.title,
+                    json.dumps(record.authors, ensure_ascii=False),
+                    record.abstract,
+                    record.year,
+                    record.pdf_url,
+                    record.markdown,
+                    record.url,
+                    record.publication,
+                    record.research_results,
+                    raw,
+                    citekey,
+                ),
+            )
+            self._conn.commit()
         logger.debug("cache upsert %s (%s)", key, record.source)
         return key
 
@@ -260,18 +291,19 @@ class PaperCache:
     def upsert_markdown(self, dedup_key: str, markdown: str) -> bool:
         """Save extracted markdown for a paper by DOI or dedup_key."""
         key = dedup_key.lower().strip()
-        cur = self._conn.execute(
-            """
-            UPDATE papers
-            SET markdown = ?, updated_at = datetime('now')
-            WHERE dedup_key = ? OR lower(doi) = ?
-            """,
-            (markdown, key, key),
-        )
-        self._conn.commit()
-        if cur.rowcount > 0:
-            logger.debug("saved markdown for %s", key)
-            return True
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                UPDATE papers
+                SET markdown = ?, updated_at = datetime('now')
+                WHERE dedup_key = ? OR lower(doi) = ? OR lower(citekey) = ?
+                """,
+                (markdown, key, key, key),
+            )
+            self._conn.commit()
+            if cur.rowcount > 0:
+                logger.debug("saved markdown for %s", key)
+                return True
 
         # Insert a stub record if the paper was downloaded directly without a prior search record
         doi = key if key.startswith("10.") else None
@@ -288,38 +320,41 @@ class PaperCache:
 
     def get_by_key(self, dedup_key: str) -> PaperRecord | None:
         key = dedup_key.lower().strip()
-        row = self._conn.execute(
-            "SELECT * FROM papers WHERE dedup_key=? OR lower(doi)=? "
-            "OR lower(url)=? OR lower(pdf_url)=?",
-            (key, key, key, key),
-        ).fetchone()
-        if row is None:
-            logger.debug("cache miss %s", key)
-            return None
-        logger.debug("cache hit %s", key)
-        return self._row_to_record(row)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM papers WHERE dedup_key=? OR lower(doi)=? "
+                "OR lower(url)=? OR lower(pdf_url)=? OR lower(citekey)=?",
+                (key, key, key, key, key),
+            ).fetchone()
+            if row is None:
+                logger.debug("cache miss %s", key)
+                return None
+            logger.debug("cache hit %s", key)
+            return self._row_to_record(row)
 
     def delete(self, dedup_key: str) -> bool:
         """Delete a paper record by dedup_key, DOI, URL, or PDF URL. Returns True if deleted."""
         key = dedup_key.lower().strip()
-        cur = self._conn.execute(
-            "DELETE FROM papers WHERE dedup_key=? OR lower(doi)=? "
-            "OR lower(url)=? OR lower(pdf_url)=?",
-            (key, key, key, key),
-        )
-        self._conn.commit()
-        deleted = cur.rowcount > 0
-        if deleted:
-            logger.info("deleted paper record matching %s", key)
-        return deleted
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM papers WHERE dedup_key=? OR lower(doi)=? "
+                "OR lower(url)=? OR lower(pdf_url)=? OR lower(citekey)=?",
+                (key, key, key, key, key),
+            )
+            self._conn.commit()
+            deleted = cur.rowcount > 0
+            if deleted:
+                logger.info("deleted paper record matching %s", key)
+            return deleted
 
     def list_all(self, limit: int = 100, offset: int = 0) -> list[PaperRecord]:
         """List papers from SQLite cache ordered by updated_at descending."""
-        rows = self._conn.execute(
-            "SELECT * FROM papers ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
-        return [self._row_to_record(r) for r in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM papers ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+            return [self._row_to_record(r) for r in rows]
 
     def log_query(
         self,
@@ -331,109 +366,125 @@ class PaperCache:
         duration_ms: float = 0.0,
     ) -> int:
         """Record a search query in search_queries table; returns query id."""
-        cur = self._conn.execute(
-            """
-            INSERT INTO search_queries
-                (raw_query, cleaned_query, sources, results_count, from_local, duration_ms)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                raw_query,
-                cleaned_query,
-                json.dumps(sources),
-                results_count,
-                1 if from_local else 0,
-                round(duration_ms, 2),
-            ),
-        )
-        self._conn.commit()
-        return cur.lastrowid  # type: ignore
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO search_queries
+                    (raw_query, cleaned_query, sources, results_count, from_local, duration_ms)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    raw_query,
+                    cleaned_query,
+                    json.dumps(sources),
+                    results_count,
+                    1 if from_local else 0,
+                    round(duration_ms, 2),
+                ),
+            )
+            self._conn.commit()
+            return cur.lastrowid  # type: ignore
 
     def link_query_papers(self, query_id: int, paper_keys: list[str]) -> None:
         """Associate a query with the resulting papers."""
         if not paper_keys:
             return
         rows = [(query_id, key, idx + 1) for idx, key in enumerate(paper_keys)]
-        self._conn.executemany(
-            """
-            INSERT OR IGNORE INTO query_papers (query_id, paper_key, rank_position)
-            VALUES (?, ?, ?)
-            """,
-            rows,
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.executemany(
+                """
+                INSERT OR IGNORE INTO query_papers (query_id, paper_key, rank_position)
+                VALUES (?, ?, ?)
+                """,
+                rows,
+            )
+            self._conn.commit()
 
     def get_recent_queries(self, query: str | None = None, limit: int = 20) -> list[dict]:
         """Retrieve recent search queries, optionally filtered by keyword."""
-        if query and query.strip():
-            pat = f"%{query.strip()}%"
-            rows = self._conn.execute(
-                """
-                SELECT * FROM search_queries
-                WHERE raw_query LIKE ? OR cleaned_query LIKE ?
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (pat, pat, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                """
-                SELECT * FROM search_queries
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+        with self._lock:
+            if query and query.strip():
+                pat = f"%{query.strip()}%"
+                rows = self._conn.execute(
+                    """
+                    SELECT * FROM search_queries
+                    WHERE raw_query LIKE ? OR cleaned_query LIKE ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (pat, pat, limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """
+                    SELECT * FROM search_queries
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
 
-        out: list[dict] = []
-        for r in rows:
-            out.append(
-                {
-                    "id": r["id"],
-                    "raw_query": r["raw_query"],
-                    "cleaned_query": r["cleaned_query"],
-                    "sources": json.loads(r["sources"] or "[]"),
-                    "results_count": r["results_count"],
-                    "from_local": bool(r["from_local"]),
-                    "duration_ms": r["duration_ms"],
-                    "created_at": r["created_at"],
-                }
-            )
-        return out
+            out: list[dict] = []
+            for r in rows:
+                out.append(
+                    {
+                        "id": r["id"],
+                        "raw_query": r["raw_query"],
+                        "cleaned_query": r["cleaned_query"],
+                        "sources": json.loads(r["sources"] or "[]"),
+                        "results_count": r["results_count"],
+                        "from_local": bool(r["from_local"]),
+                        "duration_ms": r["duration_ms"],
+                        "created_at": r["created_at"],
+                    }
+                )
+            return out
 
     def get_papers_for_query(self, query_id: int) -> list[PaperRecord]:
         """Retrieve papers returned by a specific query ID."""
-        rows = self._conn.execute(
-            """
-            SELECT p.* FROM papers p
-            JOIN query_papers qp ON p.dedup_key = qp.paper_key
-            WHERE qp.query_id = ?
-            ORDER BY qp.rank_position ASC
-            """,
-            (query_id,),
-        ).fetchall()
-        return [self._row_to_record(r) for r in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT p.* FROM papers p
+                JOIN query_papers qp ON p.dedup_key = qp.paper_key
+                WHERE qp.query_id = ?
+                ORDER BY qp.rank_position ASC
+                """,
+                (query_id,),
+            ).fetchall()
+            return [self._row_to_record(r) for r in rows]
 
     def search(self, query: str, limit: int = 50, adapted: bool = False) -> list[PaperRecord]:
         """Full-text search over title, abstract, and cached markdown content."""
+        clean = re.sub(r'["\'*^:(){}\[\]+\-~]', " ", query)
+        terms = [
+            t.strip()
+            for t in clean.split()
+            if len(t.strip()) > 1 and t.strip().upper() not in _FTS_OPERATORS
+        ]
+        if not terms:
+            return []
         if adapted:
-            terms = [t for t in query.split() if t.upper() not in _FTS_OPERATORS]
-            safe_q = " OR ".join(f"{t}*" for t in terms) if terms else query
+            safe_q = " OR ".join(f"{t}*" for t in terms)
         else:
-            safe_q = " ".join(f'"{t}"' for t in query.split())
+            safe_q = " ".join(f'"{t}"' for t in terms)
         logger.debug("fts query: %s", safe_q)
-        rows = self._conn.execute(
-            """
-            SELECT p.* FROM papers_fts f
-            JOIN papers p ON p.rowid = f.rowid
-            WHERE papers_fts MATCH ?
-            ORDER BY bm25(papers_fts)
-            LIMIT ?
-            """,
-            (safe_q, limit),
-        ).fetchall()
-        return [self._row_to_record(r) for r in rows]
+        with self._lock:
+            try:
+                rows = self._conn.execute(
+                    """
+                    SELECT p.* FROM papers_fts f
+                    JOIN papers p ON p.rowid = f.rowid
+                    WHERE papers_fts MATCH ?
+                    ORDER BY bm25(papers_fts)
+                    LIMIT ?
+                    """,
+                    (safe_q, limit),
+                ).fetchall()
+                return [self._row_to_record(r) for r in rows]
+            except sqlite3.OperationalError as e:
+                logger.warning("FTS search failed for query %r: %s", query, e)
+                return []
 
     def _row_to_record(self, row: sqlite3.Row) -> PaperRecord:
         authors = json.loads(row["authors"] or "[]")

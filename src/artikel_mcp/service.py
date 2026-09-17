@@ -867,7 +867,15 @@ def export_bibliography_file(
     if output_path:
         out_p = Path(output_path).resolve()
         out_p.parent.mkdir(parents=True, exist_ok=True)
-        out_p.write_text(formatted, encoding="utf-8")
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            "w", dir=out_p.parent, delete=False, encoding="utf-8"
+        ) as tf:
+            tf.write(formatted)
+            temp_name = tf.name
+        os.replace(temp_name, out_p)
         logger.info("exported %d papers to %s", len(records), out_p)
 
     return {

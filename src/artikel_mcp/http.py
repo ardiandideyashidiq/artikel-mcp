@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import threading
+import time
 
 from curl_cffi import requests as crequests
 
 logger = logging.getLogger("artikel_mcp.http")
 
+_POLITE_EMAIL = os.environ.get("ARTIKEL_MCP_EMAIL") or os.environ.get("UNPAYWALL_EMAIL")
+_EMAIL_SUFFIX = f" (mailto:{_POLITE_EMAIL})" if _POLITE_EMAIL else ""
 UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    f"(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36{_EMAIL_SUFFIX}"
 )
+MAX_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 class HttpError(RuntimeError):
@@ -135,9 +141,42 @@ class HttpClient:
                 except Exception as fb_err:
                     logger.debug("fallback impersonation %s failed for %s: %s", fb_imp, url, fb_err)
 
+        # Transient 429 / 5xx retry with backoff
+        if resp.status_code in (429, 500, 502, 503, 504):
+            retry_after = 1.0
+            if "retry-after" in resp.headers:
+                with contextlib.suppress(ValueError):
+                    retry_after = min(float(resp.headers["retry-after"]), 5.0)
+            logger.info(
+                "HTTP %d on %s; retrying after %.1fs backoff",
+                resp.status_code,
+                url,
+                retry_after,
+            )
+            time.sleep(retry_after)
+            try:
+                retry_resp = self._session.get(url, params=params, headers=merged, timeout=timeout)
+                if retry_resp.status_code < 400:
+                    resp = retry_resp
+            except Exception:
+                pass
+
         if resp.status_code >= 400:
             _log_error(url, resp)
             raise HttpError(f"GET {url} -> HTTP {resp.status_code}")
+
+        # Check response size cap
+        cl = resp.headers.get("content-length")
+        if cl:
+            try:
+                if int(cl) > MAX_RESPONSE_BYTES:
+                    raise HttpError(f"GET {url} response size exceeds 50MB limit ({cl} bytes)")
+            except ValueError:
+                pass
+
+        if not raw and len(resp.content) > MAX_RESPONSE_BYTES:
+            raise HttpError(f"GET {url} response content exceeds 50MB limit")
+
         return resp if raw else resp.content
 
 

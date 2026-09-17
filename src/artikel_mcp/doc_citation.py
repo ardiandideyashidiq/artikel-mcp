@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import tempfile
 from pathlib import Path
 
 from artikel_mcp.cache import PaperCache
@@ -15,6 +17,17 @@ from artikel_mcp.citation import (
 from artikel_mcp.models import PaperRecord
 
 logger = logging.getLogger("artikel_mcp.doc_citation")
+
+
+def _atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
+    path = path.resolve()
+    dir_path = path.parent
+    dir_path.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, encoding=encoding) as tf:
+        tf.write(text)
+        temp_name = tf.name
+    os.replace(temp_name, path)
+
 
 _PANDOC_CITE_RE = re.compile(r"\[@([a-zA-Z0-9_.:/\\-]+)(?:,[^\]]*)?\]")
 _INLINE_CITE_RE = re.compile(r"(?<!\w)@([a-zA-Z0-9_.:/\\-]+)")
@@ -182,7 +195,7 @@ def insert_citation_in_file(
             lines.append(token)
             content = "\n".join(lines)
 
-    path.write_text(content, encoding="utf-8")
+    _atomic_write_text(path, content, encoding="utf-8")
     logger.info("inserted citation '%s' into %s", token, path)
 
     bib_result = None
@@ -239,7 +252,7 @@ def remove_citation_from_file(
 
     # Clean up double spaces created by deletion
     new_content = re.sub(r"[ \t]{2,}", " ", new_content)
-    path.write_text(new_content, encoding="utf-8")
+    _atomic_write_text(path, new_content, encoding="utf-8")
 
     bib_result = None
     if sync_bib:
@@ -292,14 +305,14 @@ def sync_file_bibliography(
     else:
         new_content = f"{content.rstrip()}\n\n{section_heading}\n\n{bib_text}\n"
 
-    path.write_text(new_content, encoding="utf-8")
+    _atomic_write_text(path, new_content, encoding="utf-8")
     logger.info("synced bibliography for %s (%d papers, style=%s)", path, len(records), style)
 
     companion_bib_path = None
     if companion_bib and records:
         bib_path = path.parent / f"{path.stem}.bib"
         bibtex_content = format_bibliography(records, style="bibtex")
-        bib_path.write_text(bibtex_content, encoding="utf-8")
+        _atomic_write_text(bib_path, bibtex_content, encoding="utf-8")
         companion_bib_path = str(bib_path)
         logger.info("wrote companion BibTeX file to %s", bib_path)
 

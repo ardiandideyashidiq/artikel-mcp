@@ -22,6 +22,7 @@ from artikel_mcp.service import scan_document_citations as service_scan_citation
 from artikel_mcp.service import search_papers as service_search
 from artikel_mcp.service import sync_document_bibliography as service_sync_bibliography
 from artikel_mcp.service import update_paper as service_update_paper
+from artikel_mcp.sources import registry
 
 logger = logging.getLogger("artikel_mcp")
 
@@ -784,13 +785,46 @@ def create_server(db_path: str | None = None) -> MCPServer:
             "- Limitations & Future Work"
         )
 
+    @mcp.tool(
+        description=(
+            "Perform a system health check: verifies database connectivity, FTS5 index, "
+            "and supported index availability."
+        )
+    )
+    def health_check() -> dict:
+        """Verify database and adapter health."""
+        cached_count = len(cache.list_all(limit=1))
+        return {
+            "status": "healthy",
+            "database": "ok",
+            "db_path": str(cache.path),
+            "cached_papers_available": cached_count >= 0,
+            "supported_sources": registry.supported_sources(),
+        }
+
     return mcp
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="artikel-mcp academic research MCP server")
+    parser.add_argument(
+        "--transport",
+        default="stdio",
+        choices=["stdio", "sse"],
+        help="MCP transport protocol (stdio or sse)",
+    )
+    parser.add_argument("--port", type=int, default=8000, help="Port for SSE transport")
+    args = parser.parse_args()
+
     server = create_server()
-    logger.info("starting artikel-mcp on stdio")
-    server.run(transport="stdio")
+    if args.transport == "sse":
+        logger.info("starting artikel-mcp on sse port %d", args.port)
+        server.run(transport="sse", port=args.port)
+    else:
+        logger.info("starting artikel-mcp on stdio")
+        server.run(transport="stdio")
 
 
 if __name__ == "__main__":

@@ -104,16 +104,24 @@ def search_all(
 
     records: list[PaperRecord] = []
     errors: list[str] = []
-    with ThreadPoolExecutor(max_workers=len(selected)) as pool:
+    timeout_sec = float(os.getenv("SEARCH_ALL_TIMEOUT", "15.0"))
+    with ThreadPoolExecutor(max_workers=min(len(selected), 12)) as pool:
         futures = {
             pool.submit(_search_source, name, _query_for(name, query), limit): name
             for name in selected
         }
-        for future in as_completed(futures):
-            name = futures[future]
-            try:
-                records.extend(future.result())
-            except Exception as e:  # isolation: one bad source never kills the rest
-                logger.warning("source %s failed: %s", name, e)
-                errors.append(f"{name}: {e}")
+        try:
+            for future in as_completed(futures, timeout=timeout_sec):
+                name = futures[future]
+                try:
+                    records.extend(future.result(timeout=5.0))
+                except Exception as e:  # isolation: one bad source never kills the rest
+                    logger.warning("source %s failed: %s", name, e)
+                    errors.append(f"{name}: {e}")
+        except TimeoutError:
+            logger.warning("search_all timed out waiting for remaining source futures")
+            for future, name in futures.items():
+                if not future.done():
+                    future.cancel()
+                    errors.append(f"{name}: timed out after {timeout_sec}s")
     return records, errors
