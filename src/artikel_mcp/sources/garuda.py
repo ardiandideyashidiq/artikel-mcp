@@ -39,7 +39,7 @@ class GarudaAdapter(SourceAdapter):
     def __init__(self, client: HttpClient | None = None):
         self._client = client or get_client()
 
-    def search(self, query: str, limit: int = 20) -> list[PaperRecord]:
+    def search(self, query: str, limit: int = 10) -> list[PaperRecord]:
         try:
             html = self._client.get(DOCS, params={"q": query}).decode("utf-8", "replace")
         except HttpError as e:

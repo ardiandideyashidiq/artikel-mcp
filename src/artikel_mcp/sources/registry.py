@@ -14,7 +14,10 @@ from artikel_mcp.sources.doaj import DoajAdapter
 from artikel_mcp.sources.europepmc import EuropePmcAdapter
 from artikel_mcp.sources.garuda import GarudaAdapter
 from artikel_mcp.sources.hal import HalAdapter
+from artikel_mcp.sources.openalex import OpenAlexAdapter
 from artikel_mcp.sources.pmc import PmcAdapter
+from artikel_mcp.sources.pubmed import PubmedAdapter
+from artikel_mcp.sources.semantic import SemanticAdapter
 
 logger = logging.getLogger("artikel_mcp.sources")
 
@@ -28,6 +31,9 @@ _REGISTRY: dict[str, type[SourceAdapter]] = {
         HalAdapter,
         PmcAdapter,
         GarudaAdapter,
+        OpenAlexAdapter,
+        PubmedAdapter,
+        SemanticAdapter,
     )
 }
 
@@ -62,7 +68,7 @@ def _query_for(name: str, query: str) -> str:
 def search_all(
     query: str,
     sources: list[str] | None = None,
-    limit: int = 20,
+    limit: int = 10,
 ) -> tuple[list[PaperRecord], list[str]]:
     """Fan out over requested sources concurrently; never let one failure
     abort the rest. Each source receives its source-adapted query.

@@ -30,7 +30,7 @@ class HalAdapter(SourceAdapter):
     def __init__(self, client: HttpClient | None = None):
         self._client = client or get_client()
 
-    def search(self, query: str, limit: int = 20) -> list[PaperRecord]:
+    def search(self, query: str, limit: int = 10) -> list[PaperRecord]:
         try:
             raw = self._client.get(
                 BASE,

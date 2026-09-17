@@ -41,6 +41,44 @@ def download_pdf(url: str, client: HttpClient | None = None) -> tuple[bytes, boo
     return body, False
 
 
+def resolve_pdf_with_openalex(
+    doi: str,
+    client: HttpClient | None = None,
+) -> str | None:
+    """Resolve OA PDF location for a DOI via OpenAlex; None if no OA copy."""
+    client = client or get_client()
+    clean_doi = doi.replace("https://doi.org/", "").replace("http://doi.org/", "").strip()
+    url = f"https://api.openalex.org/works/https://doi.org/{clean_doi}"
+    try:
+        import json
+
+        body = client.get(url)
+        data = json.loads(body.decode("utf-8"))
+    except Exception as e:
+        logger.debug("openalex resolution failed for %s: %s", doi, e)
+        return None
+
+    # Check primary location pdf_url
+    prim = data.get("primary_location") or {}
+    if prim.get("pdf_url"):
+        return prim["pdf_url"]
+
+    # Check all locations for a direct pdf_url
+    for loc in data.get("locations") or []:
+        if loc.get("pdf_url"):
+            return loc["pdf_url"]
+
+    # Check open_access oa_url if it looks like a direct PDF
+    oa = data.get("open_access") or {}
+    oa_url = oa.get("oa_url")
+    if oa_url and isinstance(oa_url, str):
+        lower_oa = oa_url.lower()
+        if lower_oa.endswith(".pdf") or "pdf" in lower_oa:
+            return oa_url
+
+    return None
+
+
 def resolve_pdf_with_unpaywall(
     doi: str,
     client: HttpClient | None = None,

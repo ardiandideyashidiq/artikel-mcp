@@ -190,6 +190,9 @@ _TRANSFORMS: dict[str, Callable[[str], str]] = {
     "europepmc": _expanded_query,
     "hal": _expanded_query,
     "pmc": _expanded_query,
+    "openalex": _expanded_query,
+    "pubmed": _expanded_query,
+    "semantic": _expanded_query,
     # garuda: Indonesian corpus; keep user's search keywords without filler
     "garuda": clean_conversational_query,
 }

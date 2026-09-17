@@ -17,9 +17,11 @@ logger = logging.getLogger("artikel_mcp")
 SERVER_INSTRUCTIONS = """You are connected to artikel-mcp, an academic research server.
 
 CRITICAL INSTRUCTIONS FOR USING TOOLS:
-1. STRICT ANTI-BASH & ANTI-WEBFETCH DIRECTIVE:
-   - NEVER execute bash commands (grep, find, curl, sqlite3, python scripts) OR generic web tools
-     (WebFetch, Exa, Google Search) to retrieve academic papers or parse university journal pages.
+1. STRICT ANTI-BASH, ANTI-RG, & ANTI-WEBFETCH DIRECTIVE:
+   - NEVER execute bash commands (grep, rg, ripgrep, find, curl, sqlite3) OR generic web tools
+     (WebFetch, Exa) to retrieve academic papers, parse journal pages, or inspect tool output.
+   - NEVER run `rg` or `grep` on tool output files (e.g. `/home/rd/.../tool-output/...`).
+     If you need specific papers, refine your keywords directly with `search_papers`!
    - Generic WebFetch/curl tools lack browser impersonation and get blocked by HTTP 403!
    - All scholarly literature workflows MUST use the `search_papers`, `download_paper`,
      `get_cached_paper`, and `get_search_history` tools.
@@ -39,16 +41,19 @@ CRITICAL INSTRUCTIONS FOR USING TOOLS:
      journal articles, or conference proceedings.
    - The user asks for Indonesian academic literature or legal journals (uses the 'garuda' source
      connecting directly to Kemdiktisaintek Garuda).
-   - The user asks about computer science/physics/math preprints (arXiv), open-access publications
-     (DOAJ), biomedical/life-sciences (Europe PMC / PMC), or cross-publisher DOIs (Crossref).
-   - You can request specific quantities directly (e.g. 'cari 50 artikel tentang x', limit=50).
+    - The user asks about computer science/physics/math preprints (arXiv), open-access publications
+      (DOAJ), global research catalogs (OpenAlex), biomedical/life-sciences
+      (PubMed / Europe PMC / PMC), AI-backed citation graphs (Semantic Scholar),
+      or cross-publisher DOIs (Crossref).
+    - You can request specific quantities directly (e.g. 'cari 50 artikel tentang x', limit=50).
 
 4. ALWAYS USE `download_paper` WHEN:
-   - The user asks to read, analyze, explain, or extract the full text/markdown of a specific
-     paper where a DOI, URL (article landing page, OJS, DOAJ, Garuda), or PDF URL is known.
-   - `download_paper` has a built-in Open Journal Systems (OJS) & academic repository engine:
-     it automatically parses OJS article pages (`/article/view/...`), resolves DOI landing pages,
-     locates PDF galleys, bypasses 403 blocks with browser impersonation, and extracts Markdown.
+    - The user asks to read, analyze, explain, or extract the full text/markdown of a specific
+      paper where a DOI, URL (article landing page, OJS, DOAJ, Garuda), or PDF URL is known.
+    - `download_paper` has a built-in Open Journal Systems (OJS) & academic repository engine:
+      it automatically parses OJS article pages (`/article/view/...`), resolves DOI landing pages,
+      discovers OpenAlex & Unpaywall open-access copies, locates PDF galleys, bypasses 403 blocks
+      with browser impersonation, and extracts Markdown.
 
 5. USE `get_cached_paper` WHEN:
    - You need to re-read or inspect full text/markdown of a paper previously searched or cached.
@@ -75,10 +80,11 @@ def create_server(db_path: str | None = None) -> MCPServer:
     @mcp.tool(
         description=(
             "Search across global and Indonesian academic indexes (arXiv, CrossRef, Garuda, "
-            "DOAJ, EuropePMC, HAL, PMC) and local FTS cache. Automatically persists all results "
-            "and indexes queries into SQLite. Returns guaranteed title, authors, publication, "
-            "DOI/link, and research results. USE THIS TOOL whenever the user asks for "
-            "academic papers, journals, literature reviews, or research on any topic."
+            "DOAJ, EuropePMC, HAL, PMC, OpenAlex, PubMed, Semantic Scholar) and local FTS cache. "
+            "Automatically persists all results and indexes queries into SQLite. Returns "
+            "guaranteed title, authors, publication, DOI/link, and research results. "
+            "USE THIS TOOL whenever the user asks for academic papers, journals, "
+            "literature reviews, or research on any topic."
         )
     )
     def search_papers(
@@ -96,9 +102,9 @@ def create_server(db_path: str | None = None) -> MCPServer:
             Field(
                 description=(
                     "Optional list of indexes to query: 'arxiv', 'crossref', 'garuda' "
-                    "(Indonesian portal), 'doaj', 'europepmc', 'hal', 'pmc', or 'local' "
-                    "(local database only). If omitted, searches local cache first and fans out "
-                    "to all upstream sources on cache miss."
+                    "(Indonesian portal), 'doaj', 'europepmc', 'hal', 'pmc', 'openalex', "
+                    "'pubmed', 'semantic', or 'local' (local database only). If omitted, "
+                    "searches local cache first and fans out to all upstream sources on cache miss."
                 )
             ),
         ] = None,
@@ -106,13 +112,13 @@ def create_server(db_path: str | None = None) -> MCPServer:
             int,
             Field(
                 description=(
-                    "Maximum number of papers to return (default 20, max 200). "
+                    "Maximum number of papers to return (default 10, max 200). "
                     "Can also be requested directly in query, e.g. 'cari 50 artikel tentang x'."
                 ),
                 ge=1,
                 le=200,
             ),
-        ] = 20,
+        ] = 10,
         force_refresh: Annotated[
             bool,
             Field(

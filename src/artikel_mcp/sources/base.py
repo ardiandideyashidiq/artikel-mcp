@@ -24,7 +24,7 @@ class SourceAdapter(ABC):
     name: str
 
     @abstractmethod
-    def search(self, query: str, limit: int = 20) -> list[PaperRecord]:
+    def search(self, query: str, limit: int = 10) -> list[PaperRecord]:
         """Search this source and return normalized records."""
 
     @abstractmethod

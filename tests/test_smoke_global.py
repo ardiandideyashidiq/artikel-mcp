@@ -9,7 +9,9 @@ from artikel_mcp.sources.doaj import DoajAdapter
 from artikel_mcp.sources.europepmc import EuropePmcAdapter
 from artikel_mcp.sources.garuda import GarudaAdapter
 from artikel_mcp.sources.hal import HalAdapter
+from artikel_mcp.sources.openalex import OpenAlexAdapter
 from artikel_mcp.sources.pmc import PmcAdapter
+from artikel_mcp.sources.pubmed import PubmedAdapter
 from artikel_mcp.sources.registry import search_all, supported_sources
 
 pytestmark = pytest.mark.network
@@ -25,6 +27,8 @@ pytestmark = pytest.mark.network
         HalAdapter,
         PmcAdapter,
         GarudaAdapter,
+        OpenAlexAdapter,
+        PubmedAdapter,
     ],
 )
 def test_global_adapter_smoke(adapter_cls):

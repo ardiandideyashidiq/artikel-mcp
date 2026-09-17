@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import asdict
 
@@ -13,6 +14,7 @@ from artikel_mcp.pdf import (
     PdfError,
     download_pdf,
     extract_markdown,
+    resolve_pdf_with_openalex,
     resolve_pdf_with_unpaywall,
 )
 from artikel_mcp.query_broker import (
@@ -25,11 +27,136 @@ from artikel_mcp.sources import registry
 logger = logging.getLogger("artikel_mcp.service")
 
 
+_STOPWORDS = {
+    "tentang",
+    "mengenai",
+    "terkait",
+    "soal",
+    "di",
+    "ke",
+    "dari",
+    "pada",
+    "dalam",
+    "dan",
+    "atau",
+    "yang",
+    "untuk",
+    "dengan",
+    "ini",
+    "itu",
+    "adalah",
+    "sebagai",
+    "artikel",
+    "jurnal",
+    "paper",
+    "penelitian",
+    "studi",
+    "publikasi",
+    "status",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "in",
+    "on",
+    "at",
+    "for",
+    "to",
+    "of",
+    "with",
+}
+
+
+def _extract_meaningful_tokens(query: str) -> list[str]:
+    tokens = re.findall(r"\w+", query.lower())
+    return [t for t in tokens if len(t) > 2 and t not in _STOPWORDS]
+
+
+def _score_relevance(record: PaperRecord, query_tokens: list[str], raw_query: str) -> float:
+    score = 0.0
+    title_lower = (record.title or "").lower()
+    abstract_lower = (record.abstract or "").lower()
+    findings_lower = (record.research_results or "").lower()
+    combined_text = f"{title_lower} {abstract_lower} {findings_lower}"
+
+    clean_raw = raw_query.lower().strip()
+    if clean_raw and clean_raw in title_lower:
+        score += 35.0
+    elif clean_raw and clean_raw in combined_text:
+        score += 15.0
+
+    matches_in_title = 0
+    matches_in_text = 0
+
+    for token in query_tokens:
+        if token in title_lower:
+            score += 15.0
+            matches_in_title += 1
+        elif token in combined_text:
+            score += 5.0
+            matches_in_text += 1
+
+    if query_tokens:
+        matched_ratio = (matches_in_title + matches_in_text) / len(query_tokens)
+        score += matched_ratio * 10.0
+        # If paper matches none of the key query tokens, penalize heavily
+        if matches_in_title == 0 and matches_in_text == 0:
+            score -= 50.0
+
+    # Recency bonus
+    if record.year and record.year >= 2000:
+        score += (record.year - 2000) * 0.1
+
+    # PDF bonus
+    if record.has_pdf():
+        score += 1.0
+
+    return score
+
+
+def _normalize_title_key(title: str) -> str:
+    cleaned = re.sub(r"[^\w\s]", "", title.lower())
+    return " ".join(cleaned.split())
+
+
+def _deduplicate_and_rank(records: list[PaperRecord], query: str, limit: int) -> list[PaperRecord]:
+    tokens = _extract_meaningful_tokens(query)
+    seen_doi: set[str] = set()
+    seen_titles: set[str] = set()
+    unique: list[PaperRecord] = []
+
+    for r in records:
+        if r.doi:
+            doi_key = r.doi.strip().lower()
+            if doi_key in seen_doi:
+                continue
+            seen_doi.add(doi_key)
+
+        norm_title = _normalize_title_key(r.title or "")
+        if norm_title and len(norm_title) > 10:
+            if norm_title in seen_titles:
+                continue
+            seen_titles.add(norm_title)
+
+        unique.append(r)
+
+    unique.sort(
+        key=lambda p: (
+            _score_relevance(p, tokens, query),
+            p.year or 0,
+            1 if p.has_pdf() else 0,
+        ),
+        reverse=True,
+    )
+    return unique[:limit]
+
+
 def search_papers(
     cache: PaperCache,
     query: str,
     sources: list[str] | None = None,
-    limit: int = 20,
+    limit: int = 10,
     force_refresh: bool = False,
 ) -> dict:
     """Search academic indexes and local cache with query intelligence and persistence.
@@ -43,7 +170,7 @@ def search_papers(
     """
     t0 = time.monotonic()
     cleaned, natural_limit = extract_query_limit(query)
-    if natural_limit is not None and limit == 20:
+    if natural_limit is not None and limit == 10:
         limit = natural_limit
     ident = extract_identifier(cleaned)
 
@@ -69,6 +196,10 @@ def search_papers(
             f"- **DOI / Link**: {data['url']}\n"
             f"- **Research Results & Key Findings**: {data['research_results']}"
         )
+        # Compact search list view: truncate long abstracts and omit raw extra dict
+        if data.get("abstract") and len(data["abstract"]) > 400:
+            data["abstract"] = data["abstract"][:397] + "..."
+        data.pop("extra", None)
         return data
 
     docs: list[dict] = []
@@ -98,8 +229,9 @@ def search_papers(
 
     # 1) Try local FTS pass first (cache-first contract) if not force_refresh
     if not force_refresh:
-        hits = cache.search(local_adapt(cleaned), limit=limit, adapted=True)
-        for i, r in enumerate(hits, start=1):
+        hits = cache.search(local_adapt(cleaned), limit=limit * 2, adapted=True)
+        ranked_hits = _deduplicate_and_rank(hits, cleaned, limit=limit)
+        for i, r in enumerate(ranked_hits, start=1):
             docs.append(_as_dict(r, idx=i))
             paper_keys.append(r.dedup_key())
         if docs:
@@ -141,7 +273,10 @@ def search_papers(
     records, errors = registry.search_all(upstream_query, sources=upstream, limit=limit)
     cache.upsert_many(records)
     logger.info("search persisted %d upstream records", len(records))
-    for i, r in enumerate(records, start=1):
+
+    # Deduplicate across sources, rank by query relevance, and trim to limit
+    ranked_records = _deduplicate_and_rank(records, cleaned, limit=limit)
+    for i, r in enumerate(ranked_records, start=1):
         docs.append(_as_dict(r, idx=i))
         paper_keys.append(r.dedup_key())
 
@@ -217,6 +352,7 @@ def download_paper(
     body: bytes | None = None
     final_pdf_url: str | None = None
     resolved_meta: OjsArticleMetadata | None = None
+    via_openalex: bool = False
     via_unpaywall: bool = False
 
     # 1. Direct PDF download attempt (if target_url explicitly points to .pdf)
@@ -239,7 +375,19 @@ def download_paper(
         except Exception as e:
             logger.info("OJS resolver failed for %s (%s)", target_for_resolver, e)
 
-    # 3. Unpaywall fallback if DOI is available
+    # 3. OpenAlex Open Access fallback if DOI is available (free, keyless)
+    if not body and doi:
+        try:
+            oa_url = resolve_pdf_with_openalex(doi)
+            if oa_url:
+                body, _ = download_pdf(oa_url)
+                final_pdf_url = oa_url
+                via_openalex = True
+                logger.info("successfully resolved via OpenAlex OA: %s", final_pdf_url)
+        except Exception as e:
+            logger.info("openalex fallback failed (%s)", e)
+
+    # 4. Unpaywall fallback if DOI is available
     if not body and doi:
         try:
             oa_url = resolve_pdf_with_unpaywall(doi)
@@ -247,12 +395,13 @@ def download_paper(
                 body, _ = download_pdf(oa_url)
                 final_pdf_url = oa_url
                 via_unpaywall = True
+                logger.info("successfully resolved via Unpaywall: %s", final_pdf_url)
         except Exception as e:
             logger.info("unpaywall fallback failed (%s)", e)
 
     if not body:
         raise PdfError(
-            f"failed to download paper via direct link, OJS engine, or Unpaywall "
+            f"failed to download paper via direct link, OJS engine, OpenAlex, or Unpaywall "
             f"(target: {target_for_resolver})"
         )
 
@@ -311,6 +460,7 @@ def download_paper(
         "title": rec.title,
         "authors": rec.authors,
         "publication": rec.publication,
+        "via_openalex": via_openalex,
         "via_unpaywall": via_unpaywall,
         "used_fallback": used_fallback,
         "is_ojs": bool(resolved_meta and resolved_meta.is_ojs),

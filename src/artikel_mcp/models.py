@@ -98,6 +98,10 @@ class PaperRecord:
             return self.doi.lower()
         return f"{self.source}:{self.source_id}"
 
+    def has_pdf(self) -> bool:
+        """Return True if record has a direct PDF URL."""
+        return bool(self.pdf_url and self.pdf_url.strip())
+
 
 def record_to_dict(record: PaperRecord) -> dict[str, Any]:
     data = asdict(record)

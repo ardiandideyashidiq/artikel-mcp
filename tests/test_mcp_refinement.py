@@ -293,7 +293,7 @@ def test_mandatory_5_fields_and_formatted_summary(tmp_path):
     cache.close()
 
 
-def test_schema_supports_200_limit(tmp_path):
+def test_schema_supports_200_limit_and_10_default(tmp_path):
     srv = create_server(db_path=str(tmp_path / "limit_test.db"))
 
     async def run():
@@ -301,5 +301,89 @@ def test_schema_supports_200_limit(tmp_path):
         search_tool = next(t for t in tools if t.name == "search_papers")
         limit_prop = search_tool.input_schema["properties"]["limit"]
         assert limit_prop["maximum"] == 200
+        assert limit_prop["default"] == 10
 
     asyncio.run(run())
+
+
+def test_relevance_ranking_and_deduplication(tmp_path):
+    from artikel_mcp.cache import PaperCache
+    from artikel_mcp.models import PaperRecord
+    from artikel_mcp.service import search_papers
+
+    cache = PaperCache(tmp_path / "relevance.db")
+
+    # Paper 1: generic legal paper without "deepfake"
+    p1 = PaperRecord(
+        source="crossref",
+        source_id="cr1",
+        title="The Melting Pot of Legal Systems in Indonesia",
+        authors=["Andi Nuzul"],
+        doi="10.1000/melting-pot",
+        publication="Law Journal",
+        abstract="Islamic law and national legal systems in Indonesia.",
+        year=2026,
+    )
+    # Paper 2: specific paper about deepfake
+    p2 = PaperRecord(
+        source="crossref",
+        source_id="cr2",
+        title="Deepfake and Electoral Crimes in Indonesia",
+        authors=["Rofi Aulia"],
+        doi="10.1000/deepfake-crime",
+        publication="Tech Law Review",
+        abstract="Legal analysis of deepfake threats during elections.",
+        year=2025,
+    )
+    # Paper 3: duplicate of Paper 2 from another source (DOAJ)
+    p3 = PaperRecord(
+        source="doaj",
+        source_id="doaj1",
+        title="Deepfake and Electoral Crimes in Indonesia",
+        authors=["Rofi Aulia"],
+        doi="10.1000/deepfake-crime",
+        publication="Tech Law Review",
+        abstract="Legal analysis of deepfake threats during elections.",
+        year=2025,
+    )
+
+    cache.upsert(p1)
+    cache.upsert(p2)
+    cache.upsert(p3)
+
+    res = search_papers(cache, "status hukum deepfake di indonesia", sources=["local"], limit=10)
+
+    # 1) Deduplication: p3 must be deduplicated because doi matches p2
+    assert res["count"] == 2
+
+    # 2) Relevance ranking: p2 ("deepfake" in title) must be ranked #1
+    assert res["records"][0]["title"] == "Deepfake and Electoral Crimes in Indonesia"
+    assert res["records"][1]["title"] == "The Melting Pot of Legal Systems in Indonesia"
+
+
+def test_compact_search_abstract_truncation(tmp_path):
+    from artikel_mcp.cache import PaperCache
+    from artikel_mcp.models import PaperRecord
+    from artikel_mcp.service import search_papers
+
+    cache = PaperCache(tmp_path / "compact.db")
+    long_abstract = "Deepfake technology analysis. " * 50  # ~1500 chars
+
+    rec = PaperRecord(
+        source="arxiv",
+        source_id="long1",
+        title="Deepfake Forensic Analysis",
+        abstract=long_abstract,
+        year=2026,
+        extra={"raw_huge_payload": [1, 2, 3] * 100},
+    )
+    cache.upsert(rec)
+
+    res = search_papers(cache, "deepfake forensic", sources=["local"])
+    p = res["records"][0]
+
+    # Abstract must be capped to 400 chars with ellipsis
+    assert len(p["abstract"]) <= 400
+    assert p["abstract"].endswith("...")
+    # Extra dictionary must be omitted in list view
+    assert "extra" not in p
