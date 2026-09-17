@@ -80,3 +80,15 @@ The system SHALL export papers into structured LaTeX documents (.tex) and compil
 #### Scenario: Export paper to academic PDF
 - **WHEN** a user exports a paper with `template="academic"` and `compile_pdf=True`
 - **THEN** the system generates the LaTeX source and compiles a PDF document with consistent typography, metadata banner, abstract, and references
+
+### Requirement: In-file document citation management and auto-sync bibliography
+The system SHALL scan, insert, and remove citation markers in markdown, text, or LaTeX document files, and automatically generate and synchronize the document's formatted references section (in styles such as APA 7th, Chicago, IEEE, MLA 9th) along with an optional companion `.bib` file.
+
+#### Scenario: Scan citations in document
+- **WHEN** a user calls `scan_citations` on a manuscript file
+- **THEN** all Pandoc markers (`[@key]`, `@key`), HTML comments, and DOIs are identified and resolved against the local database
+
+#### Scenario: Insert citation and auto-sync references
+- **WHEN** a user inserts a citation into a document
+- **THEN** the citation marker is placed at the specified line or body position and the references section is updated automatically
+

@@ -37,6 +37,13 @@ class AuthorName:
         names = [p for p in [self.first, self.middle, self.last] if p]
         return " ".join(names)
 
+    @property
+    def inverted_name(self) -> str:
+        given = f"{self.first} {self.middle}".strip()
+        if self.last and given:
+            return f"{self.last}, {given}"
+        return self.last or given
+
 
 def parse_author_name(raw: str) -> AuthorName:
     """Parse raw author string into structured AuthorName."""
@@ -231,18 +238,13 @@ def _format_chicago_author_date(record: PaperRecord) -> str:
     if not authors:
         author_block = "Unknown."
     elif len(authors) == 1:
-        author_block = (
-            f"{authors[0].last}, {authors[0].first} {authors[0].middle}".strip() + "."
-        )
+        author_block = f"{authors[0].inverted_name}."
     elif len(authors) == 2:
-        a1 = f"{authors[0].last}, {authors[0].first}".strip()
-        a2 = authors[1].full_name
-        author_block = f"{a1}, and {a2}."
+        author_block = f"{authors[0].inverted_name}, and {authors[1].full_name}."
     else:
-        a1 = f"{authors[0].last}, {authors[0].first}".strip()
         middle = [a.full_name for a in authors[1:-1]]
         last = authors[-1].full_name
-        author_block = f"{a1}, {', '.join(middle)}, and {last}."
+        author_block = f"{authors[0].inverted_name}, {', '.join(middle)}, and {last}."
 
     pub = record.publication or ""
     details = _get_pub_details(record)
@@ -275,18 +277,13 @@ def _format_chicago_notes_bib(record: PaperRecord) -> str:
     if not authors:
         author_block = "Unknown."
     elif len(authors) == 1:
-        author_block = (
-            f"{authors[0].last}, {authors[0].first} {authors[0].middle}".strip() + "."
-        )
+        author_block = f"{authors[0].inverted_name}."
     elif len(authors) == 2:
-        a1 = f"{authors[0].last}, {authors[0].first}".strip()
-        a2 = authors[1].full_name
-        author_block = f"{a1}, and {a2}."
+        author_block = f"{authors[0].inverted_name}, and {authors[1].full_name}."
     else:
-        a1 = f"{authors[0].last}, {authors[0].first}".strip()
         middle = [a.full_name for a in authors[1:-1]]
         last = authors[-1].full_name
-        author_block = f"{a1}, {', '.join(middle)}, and {last}."
+        author_block = f"{authors[0].inverted_name}, {', '.join(middle)}, and {last}."
 
     pub = record.publication or ""
     details = _get_pub_details(record)
@@ -295,15 +292,17 @@ def _format_chicago_notes_bib(record: PaperRecord) -> str:
     pub_parts = []
     if pub:
         pub_parts.append(f"*{_title_case(pub)}*")
+    vol_issue = ""
     if details["volume"]:
-        v_str = details["volume"]
+        vol_issue += details["volume"]
         if details["issue"]:
-            v_str += f", no. {details['issue']}"
-        pub_parts.append(v_str)
+            vol_issue += f", no. {details['issue']}"
+    if vol_issue:
+        pub_parts.append(vol_issue)
     if year_str:
-        pub_parts.append(year_str)
+        pub_parts.append(f"{year_str}:")
     if details["pages"]:
-        pub_parts.append(f": {details['pages']}")
+        pub_parts.append(details["pages"])
 
     pub_block = " ".join(pub_parts)
     if pub_block and not pub_block.endswith("."):
@@ -322,8 +321,7 @@ def _format_ieee(record: PaperRecord) -> str:
         author_block = f"{authors[0].initials} {authors[0].last}".strip()
     elif len(authors) == 2:
         author_block = (
-            f"{authors[0].initials} {authors[0].last} and "
-            f"{authors[1].initials} {authors[1].last}"
+            f"{authors[0].initials} {authors[0].last} and {authors[1].initials} {authors[1].last}"
         ).strip()
     elif len(authors) <= 6:
         parts = [f"{a.initials} {a.last}".strip() for a in authors[:-1]]
@@ -362,15 +360,11 @@ def _format_mla9(record: PaperRecord) -> str:
     if not authors:
         author_block = ""
     elif len(authors) == 1:
-        author_block = (
-            f"{authors[0].last}, {authors[0].first} {authors[0].middle}".strip() + "."
-        )
+        author_block = f"{authors[0].inverted_name}."
     elif len(authors) == 2:
-        author_block = (
-            f"{authors[0].last}, {authors[0].first}, and {authors[1].full_name}."
-        )
+        author_block = f"{authors[0].inverted_name}, and {authors[1].full_name}."
     else:
-        author_block = f"{authors[0].last}, {authors[0].first}, et al."
+        author_block = f"{authors[0].inverted_name}, et al."
 
     pub = record.publication or ""
     details = _get_pub_details(record)

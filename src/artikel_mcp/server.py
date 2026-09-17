@@ -16,7 +16,11 @@ from artikel_mcp.service import format_paper_citation as service_format_citation
 from artikel_mcp.service import get_cached_paper as service_get_cached
 from artikel_mcp.service import get_search_history as service_history
 from artikel_mcp.service import ingest_bibliography as service_ingest
+from artikel_mcp.service import insert_document_citation as service_insert_citation
+from artikel_mcp.service import remove_document_citation as service_remove_citation
+from artikel_mcp.service import scan_document_citations as service_scan_citations
 from artikel_mcp.service import search_papers as service_search
+from artikel_mcp.service import sync_document_bibliography as service_sync_bibliography
 from artikel_mcp.service import update_paper as service_update_paper
 
 logger = logging.getLogger("artikel_mcp")
@@ -573,6 +577,164 @@ def create_server(db_path: str | None = None) -> MCPServer:
             format_type=format_type,
             style=style,
             output_path=output_path,
+        )
+
+    @mcp.tool(
+        description=(
+            "Scan a Markdown, text, or LaTeX file for citations (Pandoc [@key], inline @key, "
+            "HTML comment cite:key, or explicit DOIs). Resolves each against the local database "
+            "and reports resolved papers and unresolved citekeys."
+        )
+    )
+    def scan_citations(
+        file_path: Annotated[
+            str,
+            Field(description="Path to Markdown, text, or LaTeX file to scan for citations."),
+        ],
+    ) -> dict:
+        """Scan a document file for citations and resolve against the local library."""
+        return service_scan_citations(cache, file_path=file_path)
+
+    @mcp.tool(
+        description=(
+            "Insert an in-text citation marker or rendered citation into a document file. "
+            "Can target a specific line number or append before the bibliography section. "
+            "By default automatically updates the document's bibliography section."
+        )
+    )
+    def insert_citation(
+        file_path: Annotated[
+            str,
+            Field(description="Path to the document file (e.g. paper.md, draft.tex)."),
+        ],
+        doi_or_key: Annotated[
+            str,
+            Field(description="DOI, dedup_key, or citation key of the paper in cache."),
+        ],
+        line_number: Annotated[
+            int | None,
+            Field(
+                description=(
+                    "Optional line number (1-based) to insert citation into. "
+                    "If omitted or beyond body, appends before references section."
+                )
+            ),
+        ] = None,
+        marker_format: Annotated[
+            str,
+            Field(
+                description=(
+                    "Citation token format: 'pandoc' (e.g. [@author2024]), "
+                    "'rendered' (e.g. (Author, 2024)), or 'comment' (<!-- cite: key -->)."
+                )
+            ),
+        ] = "pandoc",
+        style: Annotated[
+            str,
+            Field(
+                description=(
+                    "Citation style ('apa7', 'chicago', 'ieee', 'mla9', 'harvard') "
+                    "used for rendering or bibliography auto-sync."
+                )
+            ),
+        ] = "apa7",
+        narrative: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Whether to use narrative citation format (e.g. @key or 'Author (2024)')."
+                )
+            ),
+        ] = False,
+        auto_sync: Annotated[
+            bool,
+            Field(description="Automatically regenerate and sync the file's bibliography section."),
+        ] = True,
+    ) -> dict:
+        """Insert a citation marker into a file and optionally sync bibliography."""
+        return service_insert_citation(
+            cache,
+            file_path=file_path,
+            doi_or_key=doi_or_key,
+            line_number=line_number,
+            marker_format=marker_format,
+            style=style,
+            narrative=narrative,
+            auto_sync=auto_sync,
+        )
+
+    @mcp.tool(
+        description=(
+            "Remove all citation tokens matching a paper from a document file. "
+            "Removes Pandoc markers, comments, and rendered citations, then automatically "
+            "regenerates the bibliography section to keep it in sync."
+        )
+    )
+    def remove_citation(
+        file_path: Annotated[
+            str,
+            Field(description="Path to the document file."),
+        ],
+        doi_or_key: Annotated[
+            str,
+            Field(description="DOI, dedup_key, or citekey of the paper to remove."),
+        ],
+        sync_bib: Annotated[
+            bool,
+            Field(description="Whether to automatically re-sync the bibliography section."),
+        ] = True,
+        style: Annotated[
+            str,
+            Field(description="Citation style to use when re-syncing bibliography."),
+        ] = "apa7",
+    ) -> dict:
+        """Remove paper citations from a document and update bibliography."""
+        return service_remove_citation(
+            cache,
+            file_path=file_path,
+            doi_or_key=doi_or_key,
+            sync_bib=sync_bib,
+            style=style,
+        )
+
+    @mcp.tool(
+        description=(
+            "Scan all citations in a document and automatically generate or update its "
+            "formatted references section (e.g. ## References) at the bottom. Also generates "
+            "a companion BibTeX file (<file>.bib) for LaTeX/Pandoc integration."
+        )
+    )
+    def sync_bibliography(
+        file_path: Annotated[
+            str,
+            Field(description="Path to the document file (e.g. paper.md)."),
+        ],
+        style: Annotated[
+            str,
+            Field(
+                description=(
+                    "Citation style ('apa7', 'chicago', 'chicago-note', 'ieee', 'mla9', 'harvard')."
+                )
+            ),
+        ] = "apa7",
+        section_heading: Annotated[
+            str,
+            Field(description="Heading markdown for references section (default '## References')."),
+        ] = "## References",
+        companion_bib: Annotated[
+            bool,
+            Field(
+                description="Whether to generate/update a companion .bib file with BibTeX entries."
+            ),
+        ] = True,
+    ) -> dict:
+        """Scan citations in document and sync formatted references and companion .bib."""
+        return service_sync_bibliography(
+            cache,
+            file_path=file_path,
+            style=style,
+            section_heading=section_heading,
+            companion_bib=companion_bib,
         )
 
     # Register MCP Resources

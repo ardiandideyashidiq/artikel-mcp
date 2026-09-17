@@ -305,9 +305,7 @@ def resolve_and_download_ojs(
                         vmeta.pdf_url = resp.url or landing_url
                         return resp.content, vmeta
                 except Exception as e:
-                    logger.debug(
-                        "failed to enrich metadata from OJS view URL %s: %s", view_url, e
-                    )
+                    logger.debug("failed to enrich metadata from OJS view URL %s: %s", view_url, e)
         return resp.content, meta
 
     # Case 2: HTML landing page (OJS or publisher page)

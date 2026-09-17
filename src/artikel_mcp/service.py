@@ -16,6 +16,16 @@ from artikel_mcp.citation import (
     format_in_text,
     format_reference,
 )
+from artikel_mcp.doc_citation import (
+    insert_citation_in_file,
+    remove_citation_from_file,
+)
+from artikel_mcp.doc_citation import (
+    scan_file_citations as doc_scan_citations,
+)
+from artikel_mcp.doc_citation import (
+    sync_file_bibliography as doc_sync_bibliography,
+)
 from artikel_mcp.export import export_paper
 from artikel_mcp.models import PaperRecord
 from artikel_mcp.ojs import OjsArticleMetadata, resolve_and_download_ojs
@@ -867,3 +877,71 @@ def export_bibliography_file(
         "output_path": str(output_path) if output_path else None,
         "content": formatted,
     }
+
+
+def scan_document_citations(
+    cache: PaperCache,
+    file_path: str,
+) -> dict:
+    """Scan a document file for citations and resolve against the local library."""
+    return doc_scan_citations(file_path, cache)
+
+
+def insert_document_citation(
+    cache: PaperCache,
+    file_path: str,
+    doi_or_key: str,
+    *,
+    line_number: int | None = None,
+    marker_format: str = "pandoc",
+    style: str = "apa7",
+    narrative: bool = False,
+    auto_sync: bool = True,
+) -> dict:
+    """Insert a citation into a document and optionally sync its bibliography."""
+    return insert_citation_in_file(
+        file_path,
+        doi_or_key,
+        cache,
+        line_number=line_number,
+        marker_format=marker_format,
+        style=style,
+        narrative=narrative,
+        auto_sync=auto_sync,
+    )
+
+
+def remove_document_citation(
+    cache: PaperCache,
+    file_path: str,
+    doi_or_key: str,
+    *,
+    sync_bib: bool = True,
+    style: str = "apa7",
+) -> dict:
+    """Remove citations of a paper from a document and sync its bibliography."""
+    return remove_citation_from_file(
+        file_path,
+        doi_or_key,
+        cache,
+        sync_bib=sync_bib,
+        style=style,
+    )
+
+
+def sync_document_bibliography(
+    cache: PaperCache,
+    file_path: str,
+    *,
+    style: str = "apa7",
+    section_heading: str = "## References",
+    companion_bib: bool = True,
+) -> dict:
+    """Scan citations in a document and automatically generate/update its bibliography section."""
+    return doc_sync_bibliography(
+        file_path,
+        cache,
+        style=style,
+        section_heading=section_heading,
+        companion_bib=companion_bib,
+    )

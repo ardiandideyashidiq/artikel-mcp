@@ -167,7 +167,7 @@ def _inline_markdown_to_latex(text: str) -> str:
 
     def _math_sub(m):
         math_placeholders.append(m.group(0))
-        return f"__MATH_{len(math_placeholders)-1}__"
+        return f"__MATH_{len(math_placeholders) - 1}__"
 
     text = re.sub(r"\$[^$]+\$", _math_sub, text)
 
@@ -176,7 +176,7 @@ def _inline_markdown_to_latex(text: str) -> str:
 
     def _code_sub(m):
         code_placeholders.append(m.group(1))
-        return f"__CODE_{len(code_placeholders)-1}__"
+        return f"__CODE_{len(code_placeholders) - 1}__"
 
     text = re.sub(r"`([^`]+)`", _code_sub, text)
 
@@ -362,9 +362,7 @@ def render_latex(
     title_esc = escape_latex(record.title or "Untitled Document")
     title_plain = re.sub(r'["\\]', "", record.title or "Untitled")[:50]
     raw_title = record.title or ""
-    running_title = escape_latex(
-        raw_title[:40] + "..." if len(raw_title) > 40 else raw_title
-    )
+    running_title = escape_latex(raw_title[:40] + "..." if len(raw_title) > 40 else raw_title)
     authors_esc = escape_latex(", ".join(record.authors) if record.authors else "Anonymous")
     pub_esc = escape_latex(record.publication or "Academic Index")
     pub_plain = escape_latex((record.publication or "Academic Index")[:30])
