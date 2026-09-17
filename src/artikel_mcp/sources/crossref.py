@@ -55,8 +55,20 @@ class CrossrefAdapter(SourceAdapter):
             name = " ".join(p for p in (a.get("given"), a.get("family")) if p).strip()
             if name:
                 authors.append(name)
-        issued = it.get("issued", {}).get("date-parts") or [[None]]
-        year = issued[0][0]
+        issued = it.get("issued", {}).get("date-parts")
+        year = None
+        if (
+            issued
+            and isinstance(issued, list)
+            and len(issued) > 0
+            and isinstance(issued[0], list)
+            and len(issued[0]) > 0
+            and issued[0][0] is not None
+        ):
+            try:
+                year = int(issued[0][0])
+            except (ValueError, TypeError):
+                year = None
         link = None
         for ln in it.get("link") or []:
             if ln.get("content-type") == "application/pdf":

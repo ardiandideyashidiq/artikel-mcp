@@ -313,11 +313,14 @@ def search_papers(
     if raw_sources is None:
         requested = registry.default_sources()
     elif isinstance(raw_sources, str):
-        requested = registry.supported_sources() if raw_sources.lower() == "all" else [raw_sources]
+        raw_list = registry.supported_sources() if raw_sources.lower() == "all" else [raw_sources]
+        requested = ["local" if s.lower() in ("cache", "db", "database") else s for s in raw_list]
     elif any(isinstance(s, str) and s.lower() == "all" for s in raw_sources):
         requested = registry.supported_sources()
     else:
-        requested = list(raw_sources)
+        requested = [
+            "local" if str(s).lower() in ("cache", "db", "database") else s for s in raw_sources
+        ]
 
     local_only = "local" in requested and len(requested) == 1
 
@@ -455,8 +458,8 @@ def download_paper(
     if doi and (doi.startswith("http://") or doi.startswith("https://")):
         if "doi.org/10." in doi:
             ident = extract_identifier(doi)
-            if ident and ident[0] == "doi":
-                doi = ident[1]
+            if ident and ident.get("type") == "doi":
+                doi = ident["value"]
         else:
             target_url = target_url or doi
             doi = None
@@ -601,10 +604,8 @@ def download_paper(
         rec.pdf_url = final_pdf_url
     rec.markdown = md
 
-    cache.upsert(rec)
-    target_key = doi or final_pdf_url or target_url
-    if target_key:
-        cache.upsert_markdown(target_key, md)
+    key = cache.upsert(rec)
+    cache.upsert_markdown(key, md)
 
     out_md = md
     is_truncated = False

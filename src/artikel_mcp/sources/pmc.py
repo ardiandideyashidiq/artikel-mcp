@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from artikel_mcp.http import HttpClient, HttpError, get_client
 from artikel_mcp.models import PaperRecord
@@ -91,7 +92,11 @@ class PmcAdapter(SourceAdapter):
             url=url,
             publication=publication,
             abstract=f"Artikel terindeks di PubMed Central: {publication}.",
-            year=int(str(entry.get("pubdate", "")[:4])) if entry.get("pubdate") else None,
+            year=(
+                int(re.search(r"\b(19\d\d|20\d\d)\b", str(entry.get("pubdate") or "")).group(1))
+                if re.search(r"\b(19\d\d|20\d\d)\b", str(entry.get("pubdate") or ""))
+                else None
+            ),
             pdf_url=pdf,
             extra={"pmid": article_ids.get("pmid"), "journal": publication},
         )
@@ -103,6 +108,8 @@ class PmcAdapter(SourceAdapter):
 
 
 def _extract_doi(article_ids: dict, entry: dict) -> str | None:
+    if "doi" in article_ids and article_ids["doi"]:
+        return str(article_ids["doi"]).strip()
     if entry.get("elocationid", "").startswith("10."):
         return entry["elocationid"]
     pii = article_ids.get("pii")

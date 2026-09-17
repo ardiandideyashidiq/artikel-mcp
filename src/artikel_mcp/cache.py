@@ -296,9 +296,10 @@ class PaperCache:
                 """
                 UPDATE papers
                 SET markdown = ?, updated_at = datetime('now')
-                WHERE dedup_key = ? OR lower(doi) = ? OR lower(citekey) = ?
+                WHERE dedup_key = ? OR lower(doi) = ? OR lower(url) = ?
+                   OR lower(pdf_url) = ? OR lower(citekey) = ?
                 """,
-                (markdown, key, key, key),
+                (markdown, key, key, key, key, key),
             )
             self._conn.commit()
             if cur.rowcount > 0:

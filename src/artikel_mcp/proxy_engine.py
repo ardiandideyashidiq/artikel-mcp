@@ -404,12 +404,12 @@ class LocalSocks5Server:
         self, client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter
     ) -> None:
         try:
-            greet = await client_reader.read(2)
-            if len(greet) < 2 or greet[0] != 0x05:
+            greet = await client_reader.readexactly(2)
+            if greet[0] != 0x05:
                 client_writer.close()
                 return
             nmethods = greet[1]
-            methods = await client_reader.read(nmethods)
+            methods = await client_reader.readexactly(nmethods)
             if 0x00 not in methods:  # NO AUTH
                 client_writer.write(b"\x05\xff")
                 await client_writer.drain()
@@ -419,8 +419,8 @@ class LocalSocks5Server:
             client_writer.write(b"\x05\x00")
             await client_writer.drain()
 
-            req = await client_reader.read(4)
-            if len(req) < 4 or req[0] != 0x05 or req[1] != 0x01:  # CONNECT
+            req = await client_reader.readexactly(4)
+            if req[0] != 0x05 or req[1] != 0x01:  # CONNECT
                 client_writer.write(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
                 await client_writer.drain()
                 client_writer.close()
@@ -431,17 +431,17 @@ class LocalSocks5Server:
             is_domain = False
 
             if atyp == 0x01:  # IPv4
-                raw_ip = await client_reader.read(4)
+                raw_ip = await client_reader.readexactly(4)
                 target_host = socket.inet_ntoa(raw_ip)
                 is_domain = False
             elif atyp == 0x03:  # Domain (STRICT ZERO DNS LEAK: do NOT resolve locally!)
-                len_byte = await client_reader.read(1)
+                len_byte = await client_reader.readexactly(1)
                 domain_len = len_byte[0]
-                domain_bytes = await client_reader.read(domain_len)
+                domain_bytes = await client_reader.readexactly(domain_len)
                 target_host = domain_bytes.decode("utf-8", "replace")
                 is_domain = True
             elif atyp == 0x04:  # IPv6
-                raw_ip = await client_reader.read(16)
+                raw_ip = await client_reader.readexactly(16)
                 target_host = socket.inet_ntop(socket.AF_INET6, raw_ip)
                 is_domain = False
             else:
@@ -450,7 +450,7 @@ class LocalSocks5Server:
                 client_writer.close()
                 return
 
-            raw_port = await client_reader.read(2)
+            raw_port = await client_reader.readexactly(2)
             target_port = struct.unpack("!H", raw_port)[0]
 
             node = self.node_pool.select_active_node()

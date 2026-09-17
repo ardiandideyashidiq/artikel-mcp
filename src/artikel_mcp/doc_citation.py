@@ -255,7 +255,7 @@ def remove_citation_from_file(
 
     patterns = [
         re.compile(rf"\[@{re.escape(cite_key)}(?:,[^\]]*)?\]"),
-        re.compile(rf"@\b{re.escape(cite_key)}\b"),
+        re.compile(rf"(?<!\w)@{re.escape(cite_key)}\b"),
         re.compile(rf"<!--\s*cite:\s*{re.escape(cite_key)}\s*-->"),
         re.compile(rf"<!--\s*cite:\s*{re.escape(doi_clean)}\s*-->"),
     ]

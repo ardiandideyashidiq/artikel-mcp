@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from artikel_mcp.http import HttpClient, HttpError, get_client
 from artikel_mcp.models import PaperRecord
@@ -78,7 +79,11 @@ class EuropePmcAdapter(SourceAdapter):
             url=url,
             publication=publication,
             abstract=clean_html(it.get("abstractText")),
-            year=int(it["pubYear"]) if it.get("pubYear") else None,
+            year=(
+                int(re.search(r"\b(19\d\d|20\d\d)\b", str(it["pubYear"])).group(1))
+                if it.get("pubYear") and re.search(r"\b(19\d\d|20\d\d)\b", str(it["pubYear"]))
+                else None
+            ),
             pdf_url=pdf,
             extra={"pmcid": it.get("pmcid"), "journal": publication},
         )

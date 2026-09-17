@@ -377,12 +377,12 @@ def render_latex(
 
     # Prepare escaped values
     title_esc = escape_latex(record.title or "Untitled Document")
-    title_plain = re.sub(r'["\\]', "", record.title or "Untitled")[:50]
+    title_plain = re.sub(r"[^\w\s-]", "", record.title or "Untitled")[:50].strip()
     raw_title = record.title or ""
     running_title = escape_latex(raw_title[:40] + "..." if len(raw_title) > 40 else raw_title)
     authors_esc = escape_latex(", ".join(record.authors) if record.authors else "Anonymous")
     pub_esc = escape_latex(record.publication or "Academic Index")
-    pub_plain = escape_latex((record.publication or "Academic Index")[:30])
+    pub_plain = re.sub(r"[^\w\s-]", "", record.publication or "Academic Index")[:30].strip()
     year_esc = str(record.year or "n.d.")
     doi_esc = escape_latex(record.doi or "")
     abstract_esc = escape_latex(record.abstract or "No abstract provided.")
