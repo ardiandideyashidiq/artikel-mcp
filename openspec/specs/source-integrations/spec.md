@@ -41,6 +41,10 @@ The system SHALL continue serving other sources when one source fails, and MUST 
 - **WHEN** the `garuda` source is searched
 - **THEN** the system uses Garuda's HTML search page (`garuda.kemdiktisaintek.go.id`) to extract paper records, since Garuda exposes no JSON API
 
+#### Scenario: Google Scholar HTML discovery and anti-aggression protection
+- **WHEN** the `scholar` source is queried
+- **THEN** the system uses `curl_cffi` with browser impersonation and persistent session cookies, parses paper cards (title, authors, publication, year, snippet, direct PDF link, and citation count), enforces serial rate-limiting to avoid aggressive scraping, and detects anti-bot CAPTCHA challenges with circuit breaking
+
 ### Requirement: Concurrent upstream fan-out
 The system SHALL query requested upstream sources concurrently so no source waits for another to complete, and SHALL bound the wait so a slow or hung source cannot indefinitely delay the result. Completed sources MUST be returned even when another source fails or times out.
 

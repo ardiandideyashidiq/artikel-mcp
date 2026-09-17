@@ -81,10 +81,10 @@ def create_server(db_path: str | None = None) -> MCPServer:
     @mcp.tool(
         description=(
             "Search across global and Indonesian academic indexes (arXiv, CrossRef, Garuda, "
-            "DOAJ, EuropePMC, HAL, PMC, OpenAlex, PubMed, Semantic Scholar) and local FTS cache. "
-            "Automatically persists all results and indexes queries into SQLite. Returns "
-            "guaranteed title, authors, publication, DOI/link, and research results. "
-            "USE THIS TOOL whenever the user asks for academic papers, journals, "
+            "Google Scholar, DOAJ, EuropePMC, HAL, PMC, OpenAlex, PubMed, Semantic Scholar) "
+            "and local FTS cache. Automatically persists all results and indexes queries into "
+            "SQLite. Returns guaranteed title, authors, publication, DOI/link, and research "
+            "results. USE THIS TOOL whenever the user asks for academic papers, journals, "
             "literature reviews, or research on any topic."
         )
     )
@@ -103,9 +103,10 @@ def create_server(db_path: str | None = None) -> MCPServer:
             Field(
                 description=(
                     "Optional list of indexes to query: 'arxiv', 'crossref', 'garuda' "
-                    "(Indonesian portal), 'doaj', 'europepmc', 'hal', 'pmc', 'openalex', "
-                    "'pubmed', 'semantic', or 'local' (local database only). If omitted, "
-                    "searches local cache first and fans out to all upstream sources on cache miss."
+                    "(Indonesian portal), 'scholar' (Google Scholar), 'doaj', 'europepmc', 'hal', "
+                    "'pmc', 'openalex', 'pubmed', 'semantic', or 'local' (local database only). "
+                    "If omitted, searches local cache first and fans out to default upstream "
+                    "sources on cache miss."
                 )
             ),
         ] = None,

@@ -59,6 +59,10 @@ def build_paper_url(record: PaperRecord) -> str:
         return f"https://hal.science/{record.source_id}"
     if record.source == "doaj":
         return f"https://doaj.org/article/{record.source_id}"
+    if record.source == "scholar":
+        if record.source_id and record.source_id.isalnum():
+            return f"https://scholar.google.com/scholar?cluster={record.source_id}"
+        return f"https://scholar.google.com/scholar?q={record.title}"
     if record.pdf_url:
         return record.pdf_url
     return f"https://scholar.google.com/scholar?q={record.title}"

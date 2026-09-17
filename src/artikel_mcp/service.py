@@ -265,7 +265,7 @@ def search_papers(
 
     docs: list[dict] = []
     paper_keys: list[str] = []
-    requested = sources or registry.SUPPORTED
+    requested = sources if sources is not None else registry.default_sources()
     local_only = "local" in requested and len(requested) == 1
 
     # Check identifier fast-path in cache

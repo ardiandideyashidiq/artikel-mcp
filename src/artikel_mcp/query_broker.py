@@ -195,6 +195,8 @@ _TRANSFORMS: dict[str, Callable[[str], str]] = {
     "semantic": _expanded_query,
     # garuda: Indonesian corpus; keep user's search keywords without filler
     "garuda": clean_conversational_query,
+    # scholar: Google Scholar keyword/exact match search; strip conversational filler
+    "scholar": clean_conversational_query,
 }
 
 

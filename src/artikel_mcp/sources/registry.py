@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from artikel_mcp.models import PaperRecord
@@ -17,6 +18,7 @@ from artikel_mcp.sources.hal import HalAdapter
 from artikel_mcp.sources.openalex import OpenAlexAdapter
 from artikel_mcp.sources.pmc import PmcAdapter
 from artikel_mcp.sources.pubmed import PubmedAdapter
+from artikel_mcp.sources.scholar import ScholarAdapter
 from artikel_mcp.sources.semantic import SemanticAdapter
 
 logger = logging.getLogger("artikel_mcp.sources")
@@ -33,11 +35,23 @@ _REGISTRY: dict[str, type[SourceAdapter]] = {
         GarudaAdapter,
         OpenAlexAdapter,
         PubmedAdapter,
+        ScholarAdapter,
         SemanticAdapter,
     )
 }
 
 SUPPORTED = sorted(_REGISTRY)
+
+
+def default_sources() -> list[str]:
+    """Default sources queried during unified search fan-out.
+
+    Excludes 'scholar' by default to avoid aggressive bot rate-limiting on
+    casual multi-source queries, unless ENABLE_SCHOLAR_DEFAULT=1 is configured.
+    """
+    if os.getenv("ENABLE_SCHOLAR_DEFAULT", "0") == "1":
+        return list(SUPPORTED)
+    return [s for s in SUPPORTED if s != "scholar"]
 
 
 def supported_sources() -> list[str]:
@@ -75,7 +89,7 @@ def search_all(
 
     Returns (records, errors) where errors is a list of per-source messages.
     """
-    selected = sources or SUPPORTED
+    selected = sources if sources is not None else default_sources()
     unknown = [s for s in selected if not is_supported(s)]
     if unknown:
         raise ValueError(f"unsupported source(s): {', '.join(unknown)}")
