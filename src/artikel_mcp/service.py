@@ -244,7 +244,8 @@ def _record_to_view(record: PaperRecord, idx: int = 1, error: str | None = None)
 def search_papers(
     cache: PaperCache,
     query: str,
-    sources: list[str] | None = None,
+    sources: list[str] | str | None = None,
+    source: list[str] | str | None = None,
     limit: int = 10,
     force_refresh: bool = False,
 ) -> dict:
@@ -265,7 +266,18 @@ def search_papers(
 
     docs: list[dict] = []
     paper_keys: list[str] = []
-    requested = sources if sources is not None else registry.default_sources()
+
+    # Normalize source / sources parameter
+    raw_sources = sources if sources is not None else source
+    if raw_sources is None:
+        requested = registry.default_sources()
+    elif isinstance(raw_sources, str):
+        requested = registry.supported_sources() if raw_sources.lower() == "all" else [raw_sources]
+    elif any(isinstance(s, str) and s.lower() == "all" for s in raw_sources):
+        requested = registry.supported_sources()
+    else:
+        requested = list(raw_sources)
+
     local_only = "local" in requested and len(requested) == 1
 
     # Check identifier fast-path in cache

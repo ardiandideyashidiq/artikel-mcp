@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from artikel_mcp.models import PaperRecord
 from artikel_mcp.query_broker import adapt
 from artikel_mcp.sources import registry
 from artikel_mcp.sources.base import AdapterError
@@ -227,24 +228,35 @@ def test_query_broker_adapts_scholar_query():
     assert adapted_count == "privasi data"
 
 
-def test_registry_integration():
+def test_registry_integration(monkeypatch):
     assert "scholar" in registry.supported_sources()
     assert registry.is_supported("scholar")
 
-    # By default, scholar is excluded from default_sources unless ENABLE_SCHOLAR_DEFAULT=1
-    defaults = registry.default_sources()
-    assert "scholar" not in defaults
-
-    # Explicit search includes scholar
-    records, errors = registry.search_all("deepfake", sources=["scholar"])
-    # May fail with captcha/outage or return records, but should never raise unsupported source
-    assert isinstance(records, list)
-
-
-def test_registry_enable_scholar_default(monkeypatch):
-    monkeypatch.setenv("ENABLE_SCHOLAR_DEFAULT", "1")
+    # By default, scholar is included in default_sources backed by proxy rotation
     defaults = registry.default_sources()
     assert "scholar" in defaults
+
+    # Mock Scholar search so offline test stays fast and never touches network
+    monkeypatch.setattr(
+        ScholarAdapter,
+        "search",
+        lambda self, q, limit=10: [
+            PaperRecord(
+                source="scholar",
+                source_id="cluster_123",
+                title="Mocked Scholar Paper",
+            )
+        ],
+    )
+    records, errors = registry.search_all("deepfake", sources=["scholar"])
+    assert len(records) == 1
+    assert records[0].title == "Mocked Scholar Paper"
+
+
+def test_registry_disable_scholar_default(monkeypatch):
+    monkeypatch.setenv("DISABLE_SCHOLAR_DEFAULT", "1")
+    defaults = registry.default_sources()
+    assert "scholar" not in defaults
 
 
 @pytest.mark.network

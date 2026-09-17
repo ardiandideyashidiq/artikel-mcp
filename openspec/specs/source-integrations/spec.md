@@ -5,11 +5,15 @@ Integrates academic discovery sources into the MCP server as pluggable adapters 
 ## Requirements
 
 ### Requirement: Unified paper search across configured sources
-The system SHALL expose a `search_papers` tool that accepts a query and a list of source names, queries each requested source, and returns normalized paper records. The source set MUST include: `crossref`, `doaj`, `europepmc`, `hal`, `arxiv`, `pmc`, and `garuda`. Semantic Scholar MUST NOT be queried.
+The system SHALL expose a `search_papers` tool that accepts a query, optional `source` (defaulting to `"all"`), and optional `sources` list, queries requested sources, and returns normalized paper records. The default source set includes all supported indexes: `arxiv`, `crossref`, `doaj`, `europepmc`, `garuda`, `hal`, `openalex`, `pmc`, `pubmed`, `scholar`, and `semantic`.
 
 #### Scenario: Search across multiple sources
 - **WHEN** a user calls `search_papers` with query "deep learning" and sources `["crossref", "arxiv"]`
 - **THEN** the system returns paper records from both sources, each carrying a source name, stable source id, title, authors, abstract when available, publication metadata, and any resolvable PDF link
+
+#### Scenario: Default search queries all sources including Google Scholar
+- **WHEN** a user calls `search_papers` with query "deep learning" without specifying a source, or specifying `source="all"`
+- **THEN** the system queries all supported sources concurrently, including Google Scholar with auto-rotating proxy support, and returns merged deduplicated records
 
 #### Scenario: Unsupported source rejected
 - **WHEN** a user calls `search_papers` with a source name outside the supported set

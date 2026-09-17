@@ -46,12 +46,12 @@ SUPPORTED = sorted(_REGISTRY)
 def default_sources() -> list[str]:
     """Default sources queried during unified search fan-out.
 
-    Excludes 'scholar' by default to avoid aggressive bot rate-limiting on
-    casual multi-source queries, unless ENABLE_SCHOLAR_DEFAULT=1 is configured.
+    Includes all supported sources (including 'scholar' backed by proxy rotation)
+    unless DISABLE_SCHOLAR_DEFAULT=1 is configured.
     """
-    if os.getenv("ENABLE_SCHOLAR_DEFAULT", "0") == "1":
-        return list(SUPPORTED)
-    return [s for s in SUPPORTED if s != "scholar"]
+    if os.getenv("DISABLE_SCHOLAR_DEFAULT", "0") == "1":
+        return [s for s in SUPPORTED if s != "scholar"]
+    return list(SUPPORTED)
 
 
 def supported_sources() -> list[str]:
@@ -81,7 +81,7 @@ def _query_for(name: str, query: str) -> str:
 
 def search_all(
     query: str,
-    sources: list[str] | None = None,
+    sources: list[str] | str | None = None,
     limit: int = 10,
 ) -> tuple[list[PaperRecord], list[str]]:
     """Fan out over requested sources concurrently; never let one failure
@@ -89,7 +89,15 @@ def search_all(
 
     Returns (records, errors) where errors is a list of per-source messages.
     """
-    selected = sources if sources is not None else default_sources()
+    if sources is None:
+        selected = default_sources()
+    elif isinstance(sources, str):
+        selected = supported_sources() if sources.lower() == "all" else [sources]
+    elif any(s.lower() == "all" for s in sources):
+        selected = supported_sources()
+    else:
+        selected = list(sources)
+
     unknown = [s for s in selected if not is_supported(s)]
     if unknown:
         raise ValueError(f"unsupported source(s): {', '.join(unknown)}")

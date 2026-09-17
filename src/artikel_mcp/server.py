@@ -98,15 +98,24 @@ def create_server(db_path: str | None = None) -> MCPServer:
                 )
             ),
         ],
+        source: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Optional single index name or 'all' to query all sources (default 'all', "
+                    "which includes Google Scholar with auto-rotating proxies): 'all', 'scholar', "
+                    "'arxiv', 'crossref', 'garuda' (Indonesian portal), 'doaj', 'europepmc', "
+                    "'hal', 'pmc', 'openalex', 'pubmed', 'semantic', or 'local' "
+                    "(local database only)."
+                )
+            ),
+        ] = "all",
         sources: Annotated[
             list[str] | None,
             Field(
                 description=(
-                    "Optional list of indexes to query: 'arxiv', 'crossref', 'garuda' "
-                    "(Indonesian portal), 'scholar' (Google Scholar), 'doaj', 'europepmc', 'hal', "
-                    "'pmc', 'openalex', 'pubmed', 'semantic', or 'local' (local database only). "
-                    "If omitted, searches local cache first and fans out to default upstream "
-                    "sources on cache miss."
+                    "Optional list of indexes to query (e.g. ['scholar', 'arxiv'] or ['all']). "
+                    "Overrides 'source' if explicitly provided."
                 )
             ),
         ] = None,
@@ -130,7 +139,12 @@ def create_server(db_path: str | None = None) -> MCPServer:
     ) -> dict:
         """Search academic indexes and return normalized paper records."""
         return service_search(
-            cache, query, sources=sources, limit=limit, force_refresh=force_refresh
+            cache,
+            query,
+            sources=sources,
+            source=source,
+            limit=limit,
+            force_refresh=force_refresh,
         )
 
     @mcp.tool(
