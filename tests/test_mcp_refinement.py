@@ -346,19 +346,32 @@ def test_relevance_ranking_and_deduplication(tmp_path):
         abstract="Legal analysis of deepfake threats during elections.",
         year=2025,
     )
+    # Paper 4: second specific paper about deepfake
+    p4 = PaperRecord(
+        source="garuda",
+        source_id="garuda1",
+        title="Penegakan Hukum Terhadap Video Deepfake di Indonesia",
+        authors=["Antika Dewi"],
+        doi="10.1000/deepfake-penegakan",
+        publication="Jurnal Hukum",
+        abstract="Analisis penegakan hukum tindak pidana deepfake di Indonesia.",
+        year=2024,
+    )
 
     cache.upsert(p1)
     cache.upsert(p2)
     cache.upsert(p3)
+    cache.upsert(p4)
 
     res = search_papers(cache, "status hukum deepfake di indonesia", sources=["local"], limit=10)
 
     # 1) Deduplication: p3 must be deduplicated because doi matches p2
+    # 2) Core topic sieve: p1 (irrelevant legal paper without 'deepfake') is excluded!
     assert res["count"] == 2
-
-    # 2) Relevance ranking: p2 ("deepfake" in title) must be ranked #1
-    assert res["records"][0]["title"] == "Deepfake and Electoral Crimes in Indonesia"
-    assert res["records"][1]["title"] == "The Melting Pot of Legal Systems in Indonesia"
+    titles = [r["title"] for r in res["records"]]
+    assert "Deepfake and Electoral Crimes in Indonesia" in titles
+    assert "Penegakan Hukum Terhadap Video Deepfake di Indonesia" in titles
+    assert "The Melting Pot of Legal Systems in Indonesia" not in titles
 
 
 def test_compact_search_abstract_truncation(tmp_path):
@@ -374,6 +387,7 @@ def test_compact_search_abstract_truncation(tmp_path):
         source_id="long1",
         title="Deepfake Forensic Analysis",
         abstract=long_abstract,
+        markdown="# Full Paper Markdown Text\n\n" * 200,  # ~5000 chars of markdown
         year=2026,
         extra={"raw_huge_payload": [1, 2, 3] * 100},
     )
@@ -382,8 +396,10 @@ def test_compact_search_abstract_truncation(tmp_path):
     res = search_papers(cache, "deepfake forensic", sources=["local"])
     p = res["records"][0]
 
-    # Abstract must be capped to 400 chars with ellipsis
-    assert len(p["abstract"]) <= 400
+    # Abstract must be capped to 300 chars with ellipsis
+    assert len(p["abstract"]) <= 300
     assert p["abstract"].endswith("...")
-    # Extra dictionary must be omitted in list view
+    # Extra dictionary and massive markdown string must be omitted in list view
     assert "extra" not in p
+    assert "markdown" not in p
+    assert p["has_full_text"] is True

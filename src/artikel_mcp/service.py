@@ -67,6 +67,42 @@ _STOPWORDS = {
     "with",
 }
 
+_CONTEXT_MODIFIERS = {
+    "indonesia",
+    "indonesian",
+    "hukum",
+    "law",
+    "legal",
+    "pidana",
+    "perdata",
+    "studi",
+    "study",
+    "analisis",
+    "analysis",
+    "jurnal",
+    "journal",
+    "artikel",
+    "article",
+    "tinjauan",
+    "review",
+    "perspektif",
+    "perspective",
+    "kebijakan",
+    "policy",
+    "nasional",
+    "national",
+    "internasional",
+    "international",
+    "penerapan",
+    "implementation",
+    "isu",
+    "issue",
+    "kasus",
+    "case",
+    "status",
+    "tentang",
+}
+
 
 def _extract_meaningful_tokens(query: str) -> list[str]:
     tokens = re.findall(r"\w+", query.lower())
@@ -104,9 +140,22 @@ def _score_relevance(record: PaperRecord, query_tokens: list[str], raw_query: st
         if matches_in_title == 0 and matches_in_text == 0:
             score -= 50.0
 
+    # Core topic sieve: if query has specific domain keywords (e.g. 'deepfake', 'crispr'),
+    # candidate papers that match ZERO core keywords are off-topic noise (e.g. marriage law).
+    core_tokens = [t for t in query_tokens if t not in _CONTEXT_MODIFIERS]
+    if core_tokens:
+        core_matches = sum(1 for t in core_tokens if t in combined_text)
+        if core_matches == 0:
+            score -= 100.0
+
     # Recency bonus
-    if record.year and record.year >= 2000:
-        score += (record.year - 2000) * 0.1
+    if record.year:
+        try:
+            year_int = int(record.year)
+            if year_int >= 2000:
+                score += (year_int - 2000) * 0.1
+        except (ValueError, TypeError):
+            pass
 
     # PDF bonus
     if record.has_pdf():
@@ -141,15 +190,20 @@ def _deduplicate_and_rank(records: list[PaperRecord], query: str, limit: int) ->
 
         unique.append(r)
 
-    unique.sort(
-        key=lambda p: (
-            _score_relevance(p, tokens, query),
-            p.year or 0,
-            1 if p.has_pdf() else 0,
-        ),
-        reverse=True,
-    )
-    return unique[:limit]
+    scored = [(p, _score_relevance(p, tokens, query)) for p in unique]
+    positive_hits = [(p, s) for p, s in scored if s > 0.0]
+    candidate_list = positive_hits if positive_hits else scored
+
+    def _sort_key(item: tuple[PaperRecord, float]):
+        rec, score = item
+        try:
+            y = int(rec.year) if rec.year else 0
+        except (ValueError, TypeError):
+            y = 0
+        return (score, y, 1 if rec.has_pdf() else 0)
+
+    candidate_list.sort(key=_sort_key, reverse=True)
+    return [item[0] for item in candidate_list[:limit]]
 
 
 def search_papers(
@@ -184,9 +238,10 @@ def search_papers(
             else f"https://scholar.google.com/scholar?q={record.title}"
         )
         data["publication"] = record.publication or "Academic Publication"
-        data["research_results"] = (
-            record.research_results or "Findings and methodology detailed in publication."
-        )
+        findings = record.research_results or record.abstract or "Detailed in publication."
+        if len(findings) > 200:
+            findings = findings[:197] + "..."
+        data["research_results"] = findings
         data["error"] = error
         year_str = f" ({record.year})" if record.year else ""
         data["formatted"] = (
@@ -194,11 +249,14 @@ def search_papers(
             f"- **Authors**: {data['authors_str']}\n"
             f"- **Publication**: {data['publication']}{year_str}\n"
             f"- **DOI / Link**: {data['url']}\n"
-            f"- **Research Results & Key Findings**: {data['research_results']}"
+            f"- **Research Results & Key Findings**: {findings}"
         )
-        # Compact search list view: truncate long abstracts and omit raw extra dict
-        if data.get("abstract") and len(data["abstract"]) > 400:
-            data["abstract"] = data["abstract"][:397] + "..."
+        data["has_full_text"] = bool(record.markdown)
+        # Compact search list view: truncate long abstracts and findings
+        if data.get("abstract") and len(data["abstract"]) > 200:
+            data["abstract"] = data["abstract"][:197] + "..."
+        # CRITICAL: Strip full markdown text and extra raw metadata from search list view
+        data.pop("markdown", None)
         data.pop("extra", None)
         return data
 
