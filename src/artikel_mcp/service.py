@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import asdict
 
+from artikel_mcp.bib import collect_parse_errors, parse_bib_file
 from artikel_mcp.cache import PaperCache
 from artikel_mcp.models import PaperRecord
 from artikel_mcp.ojs import OjsArticleMetadata, resolve_and_download_ojs
@@ -206,6 +207,40 @@ def _deduplicate_and_rank(records: list[PaperRecord], query: str, limit: int) ->
     return [item[0] for item in candidate_list[:limit]]
 
 
+def _record_to_view(record: PaperRecord, idx: int = 1, error: str | None = None) -> dict:
+    """Build the 5-part formatted record view shared by search and ingest."""
+    data = asdict(record)
+    data["dedup_key"] = record.dedup_key()
+    data["authors_str"] = ", ".join(record.authors) if record.authors else "Unknown Authors"
+    data["url"] = record.url or (
+        f"https://doi.org/{record.doi}"
+        if record.doi
+        else f"https://scholar.google.com/scholar?q={record.title}"
+    )
+    data["publication"] = record.publication or "Academic Publication"
+    findings = record.research_results or record.abstract or "Detailed in publication."
+    if len(findings) > 200:
+        findings = findings[:197] + "..."
+    data["research_results"] = findings
+    data["error"] = error
+    year_str = f" ({record.year})" if record.year else ""
+    data["formatted"] = (
+        f"### {idx}. {record.title}\n"
+        f"- **Authors**: {data['authors_str']}\n"
+        f"- **Publication**: {data['publication']}{year_str}\n"
+        f"- **DOI / Link**: {data['url']}\n"
+        f"- **Research Results & Key Findings**: {findings}"
+    )
+    data["has_full_text"] = bool(record.markdown)
+    # Compact search list view: truncate long abstracts and findings
+    if data.get("abstract") and len(data["abstract"]) > 200:
+        data["abstract"] = data["abstract"][:197] + "..."
+    # CRITICAL: Strip full markdown text and extra raw metadata from search list view
+    data.pop("markdown", None)
+    data.pop("extra", None)
+    return data
+
+
 def search_papers(
     cache: PaperCache,
     query: str,
@@ -228,38 +263,6 @@ def search_papers(
         limit = natural_limit
     ident = extract_identifier(cleaned)
 
-    def _as_dict(record: PaperRecord, idx: int = 1, error: str | None = None) -> dict:
-        data = asdict(record)
-        data["dedup_key"] = record.dedup_key()
-        data["authors_str"] = ", ".join(record.authors) if record.authors else "Unknown Authors"
-        data["url"] = record.url or (
-            f"https://doi.org/{record.doi}"
-            if record.doi
-            else f"https://scholar.google.com/scholar?q={record.title}"
-        )
-        data["publication"] = record.publication or "Academic Publication"
-        findings = record.research_results or record.abstract or "Detailed in publication."
-        if len(findings) > 200:
-            findings = findings[:197] + "..."
-        data["research_results"] = findings
-        data["error"] = error
-        year_str = f" ({record.year})" if record.year else ""
-        data["formatted"] = (
-            f"### {idx}. {record.title}\n"
-            f"- **Authors**: {data['authors_str']}\n"
-            f"- **Publication**: {data['publication']}{year_str}\n"
-            f"- **DOI / Link**: {data['url']}\n"
-            f"- **Research Results & Key Findings**: {findings}"
-        )
-        data["has_full_text"] = bool(record.markdown)
-        # Compact search list view: truncate long abstracts and findings
-        if data.get("abstract") and len(data["abstract"]) > 200:
-            data["abstract"] = data["abstract"][:197] + "..."
-        # CRITICAL: Strip full markdown text and extra raw metadata from search list view
-        data.pop("markdown", None)
-        data.pop("extra", None)
-        return data
-
     docs: list[dict] = []
     paper_keys: list[str] = []
     requested = sources or registry.SUPPORTED
@@ -270,7 +273,7 @@ def search_papers(
         val = ident["value"]
         cached = cache.get_by_key(val)
         if cached:
-            d = _as_dict(cached, idx=1)
+            d = _record_to_view(cached, idx=1)
             docs.append(d)
             paper_keys.append(cached.dedup_key())
             duration_ms = (time.monotonic() - t0) * 1000
@@ -290,7 +293,7 @@ def search_papers(
         hits = cache.search(local_adapt(cleaned), limit=limit * 2, adapted=True)
         ranked_hits = _deduplicate_and_rank(hits, cleaned, limit=limit)
         for i, r in enumerate(ranked_hits, start=1):
-            docs.append(_as_dict(r, idx=i))
+            docs.append(_record_to_view(r, idx=i))
             paper_keys.append(r.dedup_key())
         if docs:
             logger.info("search served %d local hits from FTS", len(docs))
@@ -335,7 +338,7 @@ def search_papers(
     # Deduplicate across sources, rank by query relevance, and trim to limit
     ranked_records = _deduplicate_and_rank(records, cleaned, limit=limit)
     for i, r in enumerate(ranked_records, start=1):
-        docs.append(_as_dict(r, idx=i))
+        docs.append(_record_to_view(r, idx=i))
         paper_keys.append(r.dedup_key())
 
     duration_ms = (time.monotonic() - t0) * 1000
@@ -538,3 +541,87 @@ def get_cached_paper(cache: PaperCache, key_or_doi: str) -> dict | None:
 def get_search_history(cache: PaperCache, query: str | None = None, limit: int = 20) -> list[dict]:
     """Retrieve recent queries and results from SQLite."""
     return cache.get_recent_queries(query=query, limit=limit)
+
+
+_SCHOLAR_FALLBACK_PREFIX = "https://scholar.google.com/scholar?q="
+
+
+def ingest_bibliography(
+    cache: PaperCache,
+    bib_path: str,
+    download: bool = True,
+    limit: int = 200,
+) -> dict:
+    """Parse a .bib file, index its entries, and download their full text.
+
+    - Normalizes every entry to the canonical record shape via `bib.parse_bib_file`.
+    - Persists all entries to the cache; duplicate DOIs collapse onto one record.
+    - With `download` enabled (default), fetches each entry's full text through the
+      existing `download_paper` pipeline, serially and isolated per entry.
+    - Idempotent: entries already carrying markdown are reported `cached`.
+    """
+    t0 = time.monotonic()
+    with collect_parse_errors() as parse_errors:
+        records = parse_bib_file(bib_path)
+    if limit and limit > 0:
+        records = records[:limit]
+
+    # Index first so every parsed entry persists even if downloads later fail.
+    cache.upsert_many(records)
+    logger.info("bib ingest indexed %d records from %s", len(records), bib_path)
+
+    counts = {"downloaded": 0, "cached": 0, "skipped": 0, "failed": 0}
+    docs: list[dict] = []
+    for idx, rec in enumerate(records, start=1):
+        status = "skipped"
+        error: str | None = None
+        if download:
+            existing = cache.get_by_key(rec.dedup_key())
+            if existing and existing.markdown:
+                rec.markdown = existing.markdown
+                status = "cached"
+            else:
+                has_source = bool(rec.doi) or (
+                    rec.url and not rec.url.startswith(_SCHOLAR_FALLBACK_PREFIX)
+                )
+                if not has_source:
+                    error = "no doi or direct url"
+                else:
+                    try:
+                        result = download_paper(cache, doi=rec.doi, url=rec.url)
+                        status = "cached" if result.get("from_cache") else "downloaded"
+                        if result.get("markdown"):
+                            rec.markdown = result["markdown"]
+                            cache.upsert(rec)  # attach markdown to this entry's own key
+                    except Exception as e:
+                        status = "failed"
+                        error = str(e)
+                        logger.warning("bib download failed for %s: %s", rec.dedup_key(), e)
+        counts[status] += 1
+        view = _record_to_view(rec, idx=idx, error=error)
+        view["status"] = status
+        docs.append(view)
+
+    duration_ms = (time.monotonic() - t0) * 1000
+    header = (
+        f"Ingested {len(docs)} entries from {bib_path}: "
+        f"{counts['downloaded']} downloaded, {counts['cached']} cached, "
+        f"{counts['skipped']} skipped, {counts['failed']} failed"
+        + (f", {len(parse_errors)} parse error(s)" if parse_errors else "")
+        + "."
+    )
+    if docs:
+        body = "\n\n---\n\n".join(d["formatted"] for d in docs)
+        formatted_summary = f"{header}\n\n{body}"
+    else:
+        formatted_summary = header
+
+    logger.info("bib ingest finished in %.0fms: %s", duration_ms, counts)
+    return {
+        "count": len(docs),
+        "records": docs,
+        "formatted_summary": formatted_summary,
+        "errors": list(parse_errors),
+        "summary": counts,
+        "bib_path": str(bib_path),
+    }

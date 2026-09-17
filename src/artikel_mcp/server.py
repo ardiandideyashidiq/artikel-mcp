@@ -10,6 +10,7 @@ from artikel_mcp.logging import setup_logging
 from artikel_mcp.service import download_paper as service_download
 from artikel_mcp.service import get_cached_paper as service_get_cached
 from artikel_mcp.service import get_search_history as service_history
+from artikel_mcp.service import ingest_bibliography as service_ingest
 from artikel_mcp.service import search_papers as service_search
 
 logger = logging.getLogger("artikel_mcp")
@@ -177,6 +178,48 @@ def create_server(db_path: str | None = None) -> MCPServer:
         return service_download(
             cache, doi=doi, url=url, pdf_url=pdf_url, force_fallback=force_fallback
         )
+
+    @mcp.tool(
+        description=(
+            "Ingest a BibTeX (.bib) reference file: parse every entry, normalize it to the "
+            "canonical paper record, index it into the local SQLite cache (deduplicated by DOI), "
+            "and by default download each entry's full text to Markdown through the same pipeline "
+            "as download_paper. Returns per-entry records with the 5-part formatted presentation, "
+            "a download status (downloaded/cached/skipped/failed), and an error when one occurs. "
+            "USE THIS TOOL when the user provides a .bib file or a reference-library export to "
+            "index and read in bulk."
+        )
+    )
+    def ingest_bibliography(
+        bib_path: Annotated[
+            str,
+            Field(
+                description=(
+                    "Path to the .bib file to ingest (e.g. '/home/user/refs.bib'). "
+                    "Entries are deduplicated by DOI when indexed."
+                )
+            ),
+        ],
+        download: Annotated[
+            bool,
+            Field(
+                description=(
+                    "If True (default), download and extract full text for each entry through "
+                    "the existing PDF pipeline. Set False to index only."
+                )
+            ),
+        ] = True,
+        limit: Annotated[
+            int,
+            Field(
+                description="Maximum number of entries to ingest (default 200).",
+                ge=1,
+                le=1000,
+            ),
+        ] = 200,
+    ) -> dict:
+        """Ingest a BibTeX file, index its entries, and download full text."""
+        return service_ingest(cache, bib_path, download=download, limit=limit)
 
     @mcp.tool(
         description=(

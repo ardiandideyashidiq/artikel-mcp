@@ -5,6 +5,7 @@ description = "MCP server for article workflows"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "bibtexparser>=2.0.1",
     "curl-cffi>=0.16.3",
     "mcp[cli]>=2.2.0",
     "pymupdf>=1.28.2",
