@@ -28,10 +28,18 @@ logger = logging.getLogger("artikel_mcp")
 
 SERVER_INSTRUCTIONS = """You are connected to artikel-mcp, an academic research server.
 
+DEFAULT QUERY LIMIT RULE:
+- The default number of search results is strictly 10.
+- When calling `search_papers`, ALWAYS query exactly 10 results by default (leave `limit` unset
+  or set `limit=10`).
+- NEVER arbitrarily query 15, 20, or any other number unless the user explicitly requested
+  a specific count in their prompt (e.g. "find 20 papers", "cari 50 jurnal").
+
 RECOMMENDED WORKFLOWS:
 1. Search Papers: Use `search_papers` to query global and Indonesian databases (arXiv,
    CrossRef, OpenAlex, Semantic Scholar, Garuda, PubMed, DOAJ, Europe PMC, HAL, PMC) or local
-   SQLite cache. Supports year ranges and natural language limits.
+   SQLite cache. Always query 10 papers by default. Supports year ranges and natural
+   language limits.
 2. Download & Read Full Text: Use `download_paper` when a DOI or paper URL (including OJS, DOAJ,
    and Garuda landing pages) is known. Automatically extracts clean Markdown. For token
    efficiency on long papers, specify `summary_only=True` or a page range (`page_start`,
@@ -60,8 +68,8 @@ def create_server(db_path: str | None = None) -> MCPServer:
             "Google Scholar, DOAJ, EuropePMC, HAL, PMC, OpenAlex, PubMed, Semantic Scholar) "
             "and local FTS cache. Automatically persists all results and indexes queries into "
             "SQLite. Returns guaranteed title, authors, publication, DOI/link, and research "
-            "results. USE THIS TOOL whenever the user asks for academic papers, journals, "
-            "literature reviews, or research on any topic."
+            "results. Always queries exactly 10 results by default unless the user explicitly "
+            "requested a specific count."
         )
     )
     def search_papers(
@@ -98,9 +106,13 @@ def create_server(db_path: str | None = None) -> MCPServer:
         limit: Annotated[
             int,
             Field(
+                default=10,
                 description=(
-                    "Maximum number of papers to return (default 10, max 200). "
-                    "Can also be requested directly in query, e.g. 'cari 50 artikel tentang x'."
+                    "Number of papers to return (default 10, max 200). "
+                    "CRITICAL: Always query exactly 10 results by default. "
+                    "Only change this if the user explicitly requested a specific count "
+                    "(e.g. 'find 20 papers' or 'cari 50 artikel'). "
+                    "Do not arbitrarily choose 15 or 20."
                 ),
                 ge=1,
                 le=200,
@@ -803,7 +815,8 @@ def create_server(db_path: str | None = None) -> MCPServer:
             f"You are conducting a rigorous literature review on the topic: '{topic}'.\n"
             "Steps to follow:\n"
             "1. Formulate 2-3 specific search queries covering core concepts and applications.\n"
-            "2. Call `search_papers` with these queries across multiple indexes "
+            "2. Call `search_papers` with these queries (using default limit=10 unless the user "
+            "specifically requested a different number) across multiple indexes "
             "(including arXiv, CrossRef, and Garuda if Indonesian context is relevant).\n"
             "3. Select the most relevant 3-5 papers and call `download_paper` on their DOIs/URLs "
             "to analyze their methodologies and conclusions.\n"

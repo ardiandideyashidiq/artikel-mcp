@@ -102,12 +102,15 @@ _QUERY_LIMIT_PREFIX_RE = re.compile(
     r"^(?:"
     r"(?:tolong\s+)?(?:carikan|cari|temukan|find|search(?:\s+for)?|get|show|list)\s+"
     r"(\d{1,3})\s+"
-    r"(?:artikel|jurnal|paper|papers|articles|publikasi|studi)?\s*"
-    r"(?:tentang|mengenai|terkait|soal|on|about|for)?|"
+    r"(?:artikel|jurnal|papers?|articles?|publikasi|studi)\b\s*"
+    r"(?:(?:tentang|mengenai|terkait|soal|on|about|for)\b\s*)?|"
+    r"(?:tolong\s+)?(?:carikan|cari|temukan|find|search(?:\s+for)?|get|show|list)\s+"
     r"(\d{1,3})\s+"
-    r"(?:artikel|jurnal|paper|papers|articles|publikasi)\s*"
-    r"(?:tentang|mengenai|terkait|soal|on|about|for)?"
-    r")\s+",
+    r"(?:tentang|mengenai|terkait|soal|on|about|for)\b\s*|"
+    r"(\d{1,3})\s+"
+    r"(?:artikel|jurnal|papers?|articles?|publikasi|studi)\b\s*"
+    r"(?:(?:tentang|mengenai|terkait|soal|on|about|for)\b\s*)?"
+    r")\s*",
     re.IGNORECASE,
 )
 
@@ -132,7 +135,7 @@ def extract_query_limit(query: str) -> tuple[str, int | None]:
 
     m_prefix = _QUERY_LIMIT_PREFIX_RE.match(q)
     if m_prefix:
-        num_str = m_prefix.group(1) or m_prefix.group(2)
+        num_str = m_prefix.group(1) or m_prefix.group(2) or m_prefix.group(3)
         if num_str:
             limit = max(1, min(200, int(num_str)))
             q = q[m_prefix.end() :].strip()

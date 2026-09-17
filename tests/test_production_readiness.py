@@ -269,3 +269,23 @@ def test_arxiv_query_grouping():
 
     assert len(captured_params) == 1
     assert captured_params[0]["search_query"] == "all:(machine learning OR deep learning)"
+
+
+def test_search_papers_defaults_to_10_results(tmp_path):
+    cache = PaperCache(tmp_path / "default_limit_test.db")
+    # Insert 18 papers
+    for i in range(18):
+        rec = PaperRecord(
+            source="manual",
+            source_id=f"paper-{i:02d}",
+            title=f"Neural Architecture Search Paper {i:02d}",
+            year=2020 + (i % 4),
+        )
+        cache.upsert(rec)
+
+    # Calling search_papers without specifying limit should strictly yield 10 results
+    res = search_papers(cache, "Neural Architecture Search", source="cache")
+    assert len(res["records"]) == 10
+    assert res["count"] == 10
+
+    cache.close()

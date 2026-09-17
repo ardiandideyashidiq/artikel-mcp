@@ -290,6 +290,7 @@ def search_papers(
 ) -> dict:
     """Search academic indexes and local cache with query intelligence and persistence.
 
+    - Defaults strictly to 10 results when no specific count is requested.
     - Strips conversational phrases ('tolong carikan...', 'find papers about...').
     - Detects explicit count requests ('cari 50 artikel tentang...').
     - Detects explicit DOIs and arXiv IDs.
