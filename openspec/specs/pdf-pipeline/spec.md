@@ -5,11 +5,15 @@ Downloads academic PDFs through bot protection and converts them to clean markdo
 ## Requirements
 
 ### Requirement: Browser-impersonating PDF download
-The system SHALL download PDFs using an HTTP client that impersonates a real browser fingerprint so sources protected by bot mitigation (Cloudflare-style) respond normally. Direct PDF URLs MUST be fetched with this client and the resulting bytes validated as a PDF.
+The system SHALL download PDFs using an HTTP client that impersonates a real browser fingerprint so sources protected by bot mitigation (Cloudflare-style) respond normally. Direct PDF URLs MUST be fetched with this client and the resulting bytes validated as a PDF. When encountering HTTP 403 or WAF fingerprint challenges (such as HCDN anti-bot rules against Chromium), the client SHALL attempt fallback browser impersonation profiles (such as Safari and Firefox).
 
 #### Scenario: Protected direct download
 - **WHEN** a user requests a paper with a direct PDF URL that sits behind bot protection
 - **THEN** the system fetches it with browser impersonation and returns the PDF bytes
+
+#### Scenario: WAF fingerprint challenge fallback
+- **WHEN** a journal CDN/WAF blocks the default Chromium fingerprint with HTTP 403
+- **THEN** the client retries with an alternate browser profile (Safari/Firefox) to bypass the challenge and obtain the PDF
 
 #### Scenario: Not a PDF response
 - **WHEN** the download yields content whose magic bytes are not PDF

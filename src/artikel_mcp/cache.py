@@ -289,8 +289,9 @@ class PaperCache:
     def get_by_key(self, dedup_key: str) -> PaperRecord | None:
         key = dedup_key.lower().strip()
         row = self._conn.execute(
-            "SELECT * FROM papers WHERE dedup_key=? OR lower(doi)=?",
-            (key, key),
+            "SELECT * FROM papers WHERE dedup_key=? OR lower(doi)=? "
+            "OR lower(url)=? OR lower(pdf_url)=?",
+            (key, key, key, key),
         ).fetchone()
         if row is None:
             logger.debug("cache miss %s", key)

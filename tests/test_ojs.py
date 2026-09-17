@@ -181,6 +181,139 @@ def test_download_paper_service_resolves_ojs_and_enriches_cache(tmp_path, monkey
     assert "Extracted OJS Full Text" in cached["markdown"]
 
 
+def test_doaj_article_url_resolution(tmp_path, monkeypatch):
+    cache = PaperCache(tmp_path / "test_doaj_resolve.db")
+
+    class FakeResp:
+        def __init__(self, content: bytes, headers: dict | None = None, url: str = ""):
+            self.content = content
+            self.headers = headers or {}
+            self.url = url
+
+        @property
+        def text(self) -> str:
+            return self.content.decode("utf-8", errors="replace")
+
+    doaj_json = b"""{
+        "bibjson": {
+            "title": "Kriminalisasi Deepfake Di Indonesia",
+            "doi": "10.26623/julr.v7i2.8995",
+            "journal": {"title": "Jurnal USM Law Review"},
+            "author": [{"name": "Chiquita Thefirstly"}, {"name": "Aji Lukman"}],
+            "year": "2024",
+            "link": [
+                {
+                    "type": "fulltext",
+                    "url": "https://journals.usm.ac.id/index.php/julr/article/view/8995",
+                    "content_type": "HTML"
+                }
+            ]
+        }
+    }"""
+
+    ojs_html = """
+    <html><head>
+    <meta name="citation_title" content="Kriminalisasi Deepfake Di Indonesia">
+    <meta name="citation_pdf_url" content="https://journals.usm.ac.id/index.php/julr/article/download/8995/5673">
+    </head><body></body></html>
+    """
+
+    def fake_get_response(url: str):
+        if "api/v3/articles/" in url:
+            return FakeResp(doaj_json, headers={"content-type": "application/json"}, url=url)
+        elif "article/view/8995" in url:
+            return FakeResp(
+                ojs_html.encode("utf-8"), headers={"content-type": "text/html"}, url=url
+            )
+        return FakeResp(
+            b"%PDF-1.4 simulated pdf stream",
+            headers={"content-type": "application/pdf"},
+            url=url,
+        )
+
+    class FakeClient:
+        def get_response(self, url: str):
+            return fake_get_response(url)
+
+        def get(self, url: str):
+            return fake_get_response(url).content
+
+    monkeypatch.setattr("artikel_mcp.ojs.get_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        "artikel_mcp.service.extract_markdown",
+        lambda body, force_fallback=False: ("# DOAJ Full Text", False),
+    )
+
+    result = download_paper(
+        cache,
+        url="https://doaj.org/article/28566783a91c44b096a8449819310e9e",
+    )
+
+    assert result["doi"] == "10.26623/julr.v7i2.8995"
+    assert result["title"] == "Kriminalisasi Deepfake Di Indonesia"
+    assert result["authors"] == ["Chiquita Thefirstly", "Aji Lukman"]
+    assert result["publication"] == "Jurnal USM Law Review"
+    assert "8995/5673" in result["pdf_url"]
+
+
+def test_ojs_direct_download_enriches_from_view_page(tmp_path, monkeypatch):
+    cache = PaperCache(tmp_path / "test_ojs_enrich.db")
+
+    class FakeResp:
+        def __init__(self, content: bytes, headers: dict | None = None, url: str = ""):
+            self.content = content
+            self.headers = headers or {}
+            self.url = url
+
+        @property
+        def text(self) -> str:
+            return self.content.decode("utf-8", errors="replace")
+
+    view_html = """
+    <html><head>
+    <meta name="citation_title" content="Limitasi Normatif Pertanggungjawaban Pidana">
+    <meta name="citation_author" content="Gunawan">
+    <meta name="citation_doi" content="10.38035/jihhp.v6i5.9050">
+    <meta name="citation_journal_title" content="Jurnal Ilmu Hukum">
+    <meta name="citation_publication_date" content="2026/01/01">
+    </head><body></body></html>
+    """
+
+    def fake_get_response(url: str):
+        if "/article/view/9050" in url:
+            return FakeResp(
+                view_html.encode("utf-8"), headers={"content-type": "text/html"}, url=url
+            )
+        return FakeResp(
+            b"%PDF-1.4 simulated pdf stream",
+            headers={"content-type": "application/pdf"},
+            url=url,
+        )
+
+    class FakeClient:
+        def get_response(self, url: str):
+            return fake_get_response(url)
+
+        def get(self, url: str):
+            return fake_get_response(url).content
+
+    monkeypatch.setattr("artikel_mcp.ojs.get_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        "artikel_mcp.service.extract_markdown",
+        lambda body, force_fallback=False: ("# JIHHP Full Text", False),
+    )
+
+    result = download_paper(
+        cache,
+        pdf_url="https://dinastirev.org/JIHHP/article/download/9050/4570",
+    )
+
+    assert result["title"] == "Limitasi Normatif Pertanggungjawaban Pidana"
+    assert result["authors"] == ["Gunawan"]
+    assert result["doi"] == "10.38035/jihhp.v6i5.9050"
+    assert result["publication"] == "Jurnal Ilmu Hukum"
+
+
 @pytest.mark.network
 def test_live_ojs_download_umy(tmp_path):
     cache = PaperCache(tmp_path / "live_ojs.db")

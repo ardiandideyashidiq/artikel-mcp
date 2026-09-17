@@ -3,6 +3,7 @@
 import pymupdf
 import pytest
 
+from artikel_mcp.http import HttpClient
 from artikel_mcp.pdf import (
     PdfError,
     clean_text,
@@ -113,3 +114,24 @@ def test_unpaywall_no_oa_copy(monkeypatch):
     monkeypatch.setenv("UNPAYWALL_EMAIL", "me@example.com")
     fake = FakeClient(b'{"is_oa": false}')
     assert resolve_pdf_with_unpaywall("10.1000/xyz", client=fake) is None
+
+
+def test_http_client_impersonation_fallback_on_403(monkeypatch):
+    client = HttpClient(impersonate="chrome124")
+
+    class FakeResp:
+        def __init__(self, status_code: int, content: bytes):
+            self.status_code = status_code
+            self.content = content
+            self.headers = {"content-type": "application/pdf"}
+
+    monkeypatch.setattr(client._session, "get", lambda url, **kw: FakeResp(403, b"Forbidden"))
+
+    class FakeFallbackSession:
+        def get(self, url, **kw):
+            return FakeResp(200, b"%PDF-1.4 success")
+
+    client._fallback_sessions["safari15_5"] = FakeFallbackSession()
+
+    res = client.get("https://example.com/protected.pdf")
+    assert res == b"%PDF-1.4 success"

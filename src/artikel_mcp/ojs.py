@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import html
 import logging
 import re
@@ -31,6 +32,7 @@ _DOI_RE = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)")
 _YEAR_RE = re.compile(r"\b(19\d\d|20\d\d)\b")
 _PDF_ANCHOR_TEXT = re.compile(r"\b(pdf|download pdf|unduh pdf|unduh|full text)\b", re.I)
 _OJS_VIEW_RE = re.compile(r"(/article/view/\d+)/(\d+)")
+_DOAJ_ARTICLE_RE = re.compile(r"doaj\.org/article/([a-f0-9]+)", re.I)
 
 
 @dataclass
@@ -201,6 +203,57 @@ def resolve_and_download_ojs(
     else:
         landing_url = target_clean
 
+    # DOAJ article landing page: DOAJ web pages are behind Cloudflare Turnstile,
+    # but the DOAJ REST API (/api/v3/articles/{id}) is open and provides direct access
+    # to the DOI, authors, and publisher's fulltext/OJS URL.
+    m_doaj = _DOAJ_ARTICLE_RE.search(target_clean)
+    if m_doaj:
+        doaj_id = m_doaj.group(1)
+        doaj_api = f"https://doaj.org/api/v3/articles/{doaj_id}"
+        try:
+            import json
+
+            raw_doaj = client.get(doaj_api)
+            data = json.loads(raw_doaj.decode("utf-8"))
+            bib = data.get("bibjson", {})
+            doi_found = bib.get("doi")
+            if not doi_found:
+                for ident in bib.get("identifier") or []:
+                    if (ident.get("type") or "").lower() == "doi" and ident.get("id"):
+                        doi_found = ident["id"].strip()
+                        break
+            fulltext_url = None
+            candidate_pdf = None
+            for link in bib.get("link") or []:
+                l_url = link.get("url") or ""
+                l_ctype = (link.get("content_type") or "").lower()
+                if "pdf" in l_ctype or l_url.lower().endswith(".pdf"):
+                    candidate_pdf = l_url
+                elif link.get("type") == "fulltext" and not fulltext_url:
+                    fulltext_url = l_url
+
+            doi_target = f"https://doi.org/{doi_found}" if doi_found else None
+            next_target = candidate_pdf or fulltext_url or doi_target
+            if next_target:
+                logger.info("resolved DOAJ article %s to target %s", doaj_id, next_target)
+                body, meta = resolve_and_download_ojs(next_target, client=client)
+                if not meta.doi and doi_found:
+                    meta.doi = doi_found
+                if not meta.title and bib.get("title"):
+                    meta.title = clean_html(bib.get("title"))
+                if not meta.authors:
+                    meta.authors = [a.get("name") for a in bib.get("author") or [] if a.get("name")]
+                if not meta.publication and bib.get("journal", {}).get("title"):
+                    meta.publication = clean_html(bib["journal"]["title"])
+                if not meta.year and bib.get("year"):
+                    with contextlib.suppress(ValueError, TypeError):
+                        meta.year = int(bib["year"])
+                if not meta.abstract and bib.get("abstract"):
+                    meta.abstract = clean_html(bib.get("abstract"))
+                return body, meta
+        except Exception as e:
+            logger.warning("DOAJ API resolution failed for %s (%s)", doaj_id, e)
+
     logger.info("resolving landing/PDF URL: %s", landing_url)
     try:
         resp = client.get_response(landing_url)
@@ -238,6 +291,23 @@ def resolve_and_download_ojs(
             pdf_url=resp.url or landing_url,
             landing_url=resp.url or landing_url,
         )
+        if "/article/download/" in landing_url:
+            view_url = re.sub(
+                r"/article/download/(\d+)(?:/\d+)?.*", r"/article/view/\1", landing_url
+            )
+            if view_url != landing_url:
+                try:
+                    view_resp = client.get_response(view_url)
+                    if "text/html" in view_resp.headers.get("content-type", "").lower():
+                        vmeta = extract_ojs_metadata(
+                            view_resp.text, base_url=view_resp.url or view_url
+                        )
+                        vmeta.pdf_url = resp.url or landing_url
+                        return resp.content, vmeta
+                except Exception as e:
+                    logger.debug(
+                        "failed to enrich metadata from OJS view URL %s: %s", view_url, e
+                    )
         return resp.content, meta
 
     # Case 2: HTML landing page (OJS or publisher page)
