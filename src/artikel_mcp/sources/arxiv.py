@@ -23,10 +23,13 @@ class ArxivAdapter(SourceAdapter):
         self._client = client or get_client()
 
     def search(self, query: str, limit: int = 10) -> list[PaperRecord]:
+        clean_q = query.strip()
+        if not clean_q:
+            return []
+        needs_parens = " " in clean_q or "OR" in clean_q or "AND" in clean_q
+        sq = f"all:({clean_q})" if needs_parens else f"all:{clean_q}"
         try:
-            raw = self._client.get(
-                BASE, params={"search_query": f"all:{query}", "max_results": str(limit)}
-            )
+            raw = self._client.get(BASE, params={"search_query": sq, "max_results": str(limit)})
         except HttpError as e:
             raise AdapterError(f"arxiv request failed: {e}") from e
         try:

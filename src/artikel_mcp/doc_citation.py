@@ -19,8 +19,32 @@ from artikel_mcp.models import PaperRecord
 logger = logging.getLogger("artikel_mcp.doc_citation")
 
 
+_SENSITIVE_PREFIXES = (
+    "/etc",
+    "/bin",
+    "/sbin",
+    "/usr",
+    "/var",
+    "/root",
+    "/boot",
+    "/sys",
+    "/proc",
+    "/dev",
+)
+
+
+def validate_safe_path(file_path: str | Path) -> Path:
+    """Validate that path does not point to restricted system directories."""
+    path = Path(file_path).resolve()
+    path_str = str(path)
+    for prefix in _SENSITIVE_PREFIXES:
+        if path_str == prefix or path_str.startswith(prefix + "/"):
+            raise PermissionError(f"Access denied: restricted system path '{path}'")
+    return path
+
+
 def _atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
-    path = path.resolve()
+    path = validate_safe_path(path)
     dir_path = path.parent
     dir_path.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, encoding=encoding) as tf:
@@ -57,20 +81,18 @@ def resolve_cached_paper(cache: PaperCache, key: str) -> PaperRecord | None:
     rec = cache.get_by_key(clean_k)
     if rec:
         return rec
-    lower_k = clean_k.lower()
-    for p in cache.list_all(limit=1000):
-        if extract_citekey(p).lower() == lower_k:
-            return p
-        if p.doi and p.doi.strip().lower() == lower_k:
-            return p
-        if p.dedup_key().lower() == lower_k:
-            return p
+    # Fallback to normalized check only if key had special characters
+    lower_k = re.sub(r"\W+", "", clean_k).lower()
+    if lower_k and lower_k != clean_k.lower():
+        rec = cache.get_by_key(lower_k)
+        if rec:
+            return rec
     return None
 
 
 def scan_file_citations(file_path: str | Path, cache: PaperCache) -> dict:
     """Scan a text, markdown, or LaTeX file for cited paper keys/DOIs."""
-    path = Path(file_path).resolve()
+    path = validate_safe_path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
@@ -149,7 +171,7 @@ def insert_citation_in_file(
     auto_sync: bool = True,
 ) -> dict:
     """Insert citation marker or rendered citation into a file."""
-    path = Path(file_path).resolve()
+    path = validate_safe_path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
@@ -221,7 +243,7 @@ def remove_citation_from_file(
     style: str = "apa7",
 ) -> dict:
     """Remove all citation tokens matching a paper from a document."""
-    path = Path(file_path).resolve()
+    path = validate_safe_path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
@@ -276,7 +298,7 @@ def sync_file_bibliography(
     companion_bib: bool = True,
 ) -> dict:
     """Scan file citations and regenerate references section and .bib companion."""
-    path = Path(file_path).resolve()
+    path = validate_safe_path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 

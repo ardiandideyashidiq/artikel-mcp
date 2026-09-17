@@ -6,7 +6,6 @@ import logging
 import re
 import time
 from dataclasses import asdict
-from pathlib import Path
 
 from artikel_mcp.bib import collect_parse_errors, parse_bib_file
 from artikel_mcp.cache import PaperCache
@@ -19,6 +18,7 @@ from artikel_mcp.citation import (
 from artikel_mcp.doc_citation import (
     insert_citation_in_file,
     remove_citation_from_file,
+    validate_safe_path,
 )
 from artikel_mcp.doc_citation import (
     scan_file_citations as doc_scan_citations,
@@ -188,13 +188,31 @@ def _normalize_title_key(title: str) -> str:
     return " ".join(cleaned.split())
 
 
-def _deduplicate_and_rank(records: list[PaperRecord], query: str, limit: int) -> list[PaperRecord]:
+def _deduplicate_and_rank(
+    records: list[PaperRecord],
+    query: str,
+    limit: int,
+    year_min: int | None = None,
+    year_max: int | None = None,
+) -> list[PaperRecord]:
     tokens = _extract_meaningful_tokens(query)
     seen_doi: set[str] = set()
     seen_titles: set[str] = set()
     unique: list[PaperRecord] = []
 
     for r in records:
+        if r.year is not None:
+            try:
+                y = int(r.year)
+                if year_min is not None and y < year_min:
+                    continue
+                if year_max is not None and y > year_max:
+                    continue
+            except (ValueError, TypeError):
+                pass
+        elif year_min is not None:
+            continue
+
         if r.doi:
             doi_key = r.doi.strip().lower()
             if doi_key in seen_doi:
@@ -266,6 +284,9 @@ def search_papers(
     source: list[str] | str | None = None,
     limit: int = 10,
     force_refresh: bool = False,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    format_mode: str = "both",
 ) -> dict:
     """Search academic indexes and local cache with query intelligence and persistence.
 
@@ -275,6 +296,7 @@ def search_papers(
     - Guarantees 5 mandatory fields: title, authors, publication, DOI/link, and research results.
     - Serves cached FTS records when available (unless force_refresh is True).
     - Logs every search query and links results in SQLite for future querying.
+    - Supports year_min / year_max filtering and configurable format_mode.
     """
     t0 = time.monotonic()
     cleaned, natural_limit = extract_query_limit(query)
@@ -309,19 +331,24 @@ def search_papers(
             duration_ms = (time.monotonic() - t0) * 1000
             qid = cache.log_query(query, cleaned, ["local"], 1, True, duration_ms)
             cache.link_query_papers(qid, paper_keys)
-            return {
+            res = {
                 "count": 1,
-                "records": docs,
-                "formatted_summary": d["formatted"],
                 "from_local": True,
                 "errors": [],
                 "sources_queried": ["local"],
             }
+            if format_mode in ("both", "records"):
+                res["records"] = docs
+            if format_mode in ("both", "summary"):
+                res["formatted_summary"] = d["formatted"]
+            return res
 
     # 1) Try local FTS pass first (cache-first contract) if not force_refresh
     if not force_refresh:
         hits = cache.search(local_adapt(cleaned), limit=limit * 2, adapted=True)
-        ranked_hits = _deduplicate_and_rank(hits, cleaned, limit=limit)
+        ranked_hits = _deduplicate_and_rank(
+            hits, cleaned, limit=limit, year_min=year_min, year_max=year_max
+        )
         for i, r in enumerate(ranked_hits, start=1):
             docs.append(_record_to_view(r, idx=i))
             paper_keys.append(r.dedup_key())
@@ -331,26 +358,32 @@ def search_papers(
             qid = cache.log_query(query, cleaned, ["local"], len(docs), True, duration_ms)
             cache.link_query_papers(qid, paper_keys)
             summary = "\n\n---\n\n".join(d["formatted"] for d in docs)
-            return {
+            res = {
                 "count": len(docs),
-                "records": docs,
-                "formatted_summary": summary,
                 "from_local": True,
                 "errors": [],
                 "sources_queried": ["local"],
             }
+            if format_mode in ("both", "records"):
+                res["records"] = docs
+            if format_mode in ("both", "summary"):
+                res["formatted_summary"] = summary
+            return res
 
     if local_only:
         duration_ms = (time.monotonic() - t0) * 1000
         qid = cache.log_query(query, cleaned, ["local"], 0, True, duration_ms)
-        return {
+        res = {
             "count": 0,
-            "records": [],
-            "formatted_summary": "Tidak ada artikel ditemukan di cache lokal.",
             "from_local": True,
             "errors": [],
             "sources_queried": ["local"],
         }
+        if format_mode in ("both", "records"):
+            res["records"] = []
+        if format_mode in ("both", "summary"):
+            res["formatted_summary"] = "Tidak ada artikel ditemukan di cache lokal."
+        return res
 
     # 2) Upstream pass on local miss or force_refresh
     upstream = [s for s in requested if s != "local"]
@@ -366,7 +399,9 @@ def search_papers(
     logger.info("search persisted %d upstream records", len(records))
 
     # Deduplicate across sources, rank by query relevance, and trim to limit
-    ranked_records = _deduplicate_and_rank(records, cleaned, limit=limit)
+    ranked_records = _deduplicate_and_rank(
+        records, cleaned, limit=limit, year_min=year_min, year_max=year_max
+    )
     for i, r in enumerate(ranked_records, start=1):
         docs.append(_record_to_view(r, idx=i))
         paper_keys.append(r.dedup_key())
@@ -380,14 +415,17 @@ def search_papers(
         if docs
         else "Tidak ada artikel ditemukan dari sumber eksternal."
     )
-    return {
+    res = {
         "count": len(docs),
-        "records": docs,
-        "formatted_summary": summary,
         "from_local": False,
         "errors": errors,
         "sources_queried": upstream,
     }
+    if format_mode in ("both", "records"):
+        res["records"] = docs
+    if format_mode in ("both", "summary"):
+        res["formatted_summary"] = summary
+    return res
 
 
 def download_paper(
@@ -397,6 +435,10 @@ def download_paper(
     url: str | None = None,
     pdf_url: str | None = None,
     force_fallback: bool = False,
+    page_start: int = 0,
+    page_end: int | None = None,
+    max_pages: int = 100,
+    summary_only: bool = False,
 ) -> dict:
     """Download a paper's PDF, extract clean markdown, and persist it to SQLite.
 
@@ -426,8 +468,16 @@ def download_paper(
     if cached:
         if cached.markdown:
             logger.info("returning cached markdown for %s", lookup_key)
+            out_md = cached.markdown
+            is_truncated = False
+            if summary_only and len(out_md) > 2000:
+                out_md = (
+                    out_md[:2000] + "\n\n... [Content truncated in summary mode. "
+                    "Set summary_only=False for full text]"
+                )
+                is_truncated = True
             return {
-                "markdown": cached.markdown,
+                "markdown": out_md,
                 "pdf_url": cached.pdf_url or target_url or "",
                 "doi": cached.doi or doi,
                 "title": cached.title,
@@ -436,6 +486,8 @@ def download_paper(
                 "via_unpaywall": False,
                 "used_fallback": False,
                 "from_cache": True,
+                "is_truncated": is_truncated,
+                "char_count": len(cached.markdown),
             }
         if not target_url:
             target_url = cached.pdf_url or cached.url
@@ -496,7 +548,16 @@ def download_paper(
             f"(target: {target_for_resolver})"
         )
 
-    md, used_fallback = extract_markdown(body, force_fallback=force_fallback)
+    try:
+        md, used_fallback = extract_markdown(
+            body,
+            force_fallback=force_fallback,
+            page_start=page_start,
+            page_end=page_end,
+            max_pages=max_pages,
+        )
+    except TypeError:
+        md, used_fallback = extract_markdown(body, force_fallback=force_fallback)
 
     # Cache enrichment: persist record and markdown into SQLite
     rec = cached or PaperRecord(
@@ -544,8 +605,17 @@ def download_paper(
     if target_key:
         cache.upsert_markdown(target_key, md)
 
+    out_md = md
+    is_truncated = False
+    if summary_only and len(out_md) > 2000:
+        out_md = (
+            out_md[:2000]
+            + "\n\n... [Content truncated in summary mode. Set summary_only=False for full text]"
+        )
+        is_truncated = True
+
     return {
-        "markdown": md,
+        "markdown": out_md,
         "pdf_url": final_pdf_url,
         "doi": rec.doi,
         "title": rec.title,
@@ -555,16 +625,33 @@ def download_paper(
         "via_unpaywall": via_unpaywall,
         "used_fallback": used_fallback,
         "is_ojs": bool(resolved_meta and resolved_meta.is_ojs),
+        "is_truncated": is_truncated,
+        "char_count": len(md),
     }
 
 
-def get_cached_paper(cache: PaperCache, key_or_doi: str) -> dict | None:
+def get_cached_paper(
+    cache: PaperCache,
+    key_or_doi: str,
+    *,
+    full_text: bool = True,
+    max_chars: int | None = None,
+) -> dict | None:
     """Retrieve full metadata and cached markdown for a paper from SQLite."""
     rec = cache.get_by_key(key_or_doi)
     if rec is None:
         return None
     data = asdict(rec)
     data["dedup_key"] = rec.dedup_key()
+    if not full_text:
+        data.pop("markdown", None)
+        data["has_markdown"] = bool(rec.markdown)
+    elif max_chars and data.get("markdown") and len(data["markdown"]) > max_chars:
+        data["markdown"] = data["markdown"][:max_chars] + (
+            f"\n\n... [Content truncated at {max_chars} chars. "
+            "Set full_text=True without max_chars for full text]"
+        )
+        data["is_truncated"] = True
     return data
 
 
@@ -590,9 +677,13 @@ def ingest_bibliography(
       existing `download_paper` pipeline, serially and isolated per entry.
     - Idempotent: entries already carrying markdown are reported `cached`.
     """
+    safe_bib = validate_safe_path(bib_path)
+    if not safe_bib.exists():
+        raise FileNotFoundError(f"Bibliography file not found: {safe_bib}")
+
     t0 = time.monotonic()
     with collect_parse_errors() as parse_errors:
-        records = parse_bib_file(bib_path)
+        records = parse_bib_file(safe_bib)
     if limit and limit > 0:
         records = records[:limit]
 
@@ -865,7 +956,7 @@ def export_bibliography_file(
     formatted = format_bibliography(records, style="bibtex" if format_type == "bibtex" else style)
 
     if output_path:
-        out_p = Path(output_path).resolve()
+        out_p = validate_safe_path(output_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
         import os
         import tempfile

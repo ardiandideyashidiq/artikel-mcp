@@ -28,51 +28,16 @@ logger = logging.getLogger("artikel_mcp")
 
 SERVER_INSTRUCTIONS = """You are connected to artikel-mcp, an academic research server.
 
-CRITICAL INSTRUCTIONS FOR USING TOOLS:
-1. STRICT ANTI-BASH, ANTI-RG, & ANTI-WEBFETCH DIRECTIVE:
-   - NEVER execute bash commands (grep, rg, ripgrep, find, curl, sqlite3) OR generic web tools
-     (WebFetch, Exa) to retrieve academic papers, parse journal pages, or inspect tool output.
-   - NEVER run `rg` or `grep` on tool output files (e.g. `/home/rd/.../tool-output/...`).
-     If you need specific papers, refine your keywords directly with `search_papers`!
-   - Generic WebFetch/curl tools lack browser impersonation and get blocked by HTTP 403!
-   - All scholarly literature workflows MUST use the `search_papers`, `download_paper`,
-     `get_cached_paper`, and `get_search_history` tools.
-
-2. MANDATORY 5-PART PRESENTATION FORMAT:
-   - When presenting search results to the user, you MUST display for EVERY paper:
-     1. **Title**
-     2. **Authors**
-     3. **Publication** (Journal / Conference / Venue, Year)
-     4. **DOI / Link** (Clickable URL)
-     5. **Research Results & Key Findings** (Extracted findings from abstract)
-   - You can directly output the pre-rendered `formatted` field of each record or the
-     `formatted_summary` payload. Never omit any of these 5 fields, even for 50 or 100 papers!
-
-3. ALWAYS USE `search_papers` WHEN:
-   - The user asks to find, search, explore, or retrieve academic papers, scientific literature,
-     journal articles, or conference proceedings.
-   - The user asks for Indonesian academic literature or legal journals (uses the 'garuda' source
-     connecting directly to Kemdiktisaintek Garuda).
-    - The user asks about computer science/physics/math preprints (arXiv), open-access publications
-      (DOAJ), global research catalogs (OpenAlex), biomedical/life-sciences
-      (PubMed / Europe PMC / PMC), AI-backed citation graphs (Semantic Scholar),
-      or cross-publisher DOIs (Crossref).
-    - You can request specific quantities directly (e.g. 'cari 50 artikel tentang x', limit=50).
-
-4. ALWAYS USE `download_paper` WHEN:
-    - The user asks to read, analyze, explain, or extract the full text/markdown of a specific
-      paper where a DOI, URL (article landing page, OJS, DOAJ, Garuda), or PDF URL is known.
-    - `download_paper` has a built-in Open Journal Systems (OJS) & academic repository engine:
-      it automatically parses OJS article pages (`/article/view/...`), resolves DOI landing pages,
-      discovers OpenAlex & Unpaywall open-access copies, locates PDF galleys, bypasses 403 blocks
-      with browser impersonation, and extracts Markdown.
-
-5. USE `get_cached_paper` WHEN:
-   - You need to re-read or inspect full text/markdown of a paper previously searched or cached.
-
-6. USE `get_search_history` WHEN:
-   - The user asks what topics or queries have been researched previously, or to review past
-     search results.
+RECOMMENDED WORKFLOWS:
+1. Search Papers: Use `search_papers` to query global and Indonesian databases (arXiv,
+   CrossRef, OpenAlex, Semantic Scholar, Garuda, PubMed, DOAJ, Europe PMC, HAL, PMC) or local
+   SQLite cache. Supports year ranges and natural language limits.
+2. Download & Read Full Text: Use `download_paper` when a DOI or paper URL (including OJS, DOAJ,
+   and Garuda landing pages) is known. Automatically extracts clean Markdown. For token
+   efficiency on long papers, specify `summary_only=True` or a page range (`page_start`,
+   `page_end`, `max_pages`).
+3. Cached Papers & Citations: Use `get_cached_paper` to re-read cached papers without network
+   latency, and `format_citation` or `export_paper` for standard academic formatting.
 """
 
 
@@ -147,6 +112,27 @@ def create_server(db_path: str | None = None) -> MCPServer:
                 description="If True, bypasses local cache and fetches fresh upstream results.",
             ),
         ] = False,
+        year_min: Annotated[
+            int | None,
+            Field(
+                description="Optional minimum publication year filter (e.g. 2020).",
+            ),
+        ] = None,
+        year_max: Annotated[
+            int | None,
+            Field(
+                description="Optional maximum publication year filter (e.g. 2025).",
+            ),
+        ] = None,
+        format_mode: Annotated[
+            str,
+            Field(
+                description=(
+                    "Output format mode: 'both' (default, includes records and summary), "
+                    "'records' (structured list only), or 'summary' (compact formatted text only)."
+                ),
+            ),
+        ] = "both",
     ) -> dict:
         """Search academic indexes and return normalized paper records."""
         return service_search(
@@ -156,6 +142,9 @@ def create_server(db_path: str | None = None) -> MCPServer:
             source=source,
             limit=limit,
             force_refresh=force_refresh,
+            year_min=year_min,
+            year_max=year_max,
+            format_mode=format_mode,
         )
 
     @mcp.tool(
@@ -199,10 +188,48 @@ def create_server(db_path: str | None = None) -> MCPServer:
                 )
             ),
         ] = False,
+        page_start: Annotated[
+            int,
+            Field(
+                description="Starting page for text extraction (0-indexed, default 0).",
+                ge=0,
+            ),
+        ] = 0,
+        page_end: Annotated[
+            int | None,
+            Field(
+                description="Ending page for text extraction (optional, non-inclusive).",
+            ),
+        ] = None,
+        max_pages: Annotated[
+            int,
+            Field(
+                description="Maximum number of pages to extract (default 100).",
+                ge=1,
+                le=200,
+            ),
+        ] = 100,
+        summary_only: Annotated[
+            bool,
+            Field(
+                description=(
+                    "If True, returns a compact 2,000-character preview instead of full markdown, "
+                    "saving context window tokens on long documents."
+                ),
+            ),
+        ] = False,
     ) -> dict:
         """Download a paper's PDF, return extracted markdown, and persist it to SQLite."""
         return service_download(
-            cache, doi=doi, url=url, pdf_url=pdf_url, force_fallback=force_fallback
+            cache,
+            doi=doi,
+            url=url,
+            pdf_url=pdf_url,
+            force_fallback=force_fallback,
+            page_start=page_start,
+            page_end=page_end,
+            max_pages=max_pages,
+            summary_only=summary_only,
         )
 
     @mcp.tool(
@@ -264,9 +291,24 @@ def create_server(db_path: str | None = None) -> MCPServer:
                 )
             ),
         ],
+        full_text: Annotated[
+            bool,
+            Field(
+                description=(
+                    "If True (default), includes cached full-text markdown. "
+                    "Set False for metadata only."
+                ),
+            ),
+        ] = True,
+        max_chars: Annotated[
+            int | None,
+            Field(
+                description="Optional character cap on cached markdown to protect context windows.",
+            ),
+        ] = None,
     ) -> dict:
         """Get cached metadata and markdown text for a paper."""
-        paper = service_get_cached(cache, doi_or_key)
+        paper = service_get_cached(cache, doi_or_key, full_text=full_text, max_chars=max_chars)
         if not paper:
             return {"found": False, "message": f"Paper '{doi_or_key}' not found in local cache."}
         return {"found": True, "paper": paper}

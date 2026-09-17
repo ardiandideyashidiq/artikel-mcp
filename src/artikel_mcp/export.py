@@ -358,7 +358,18 @@ def render_latex(
     """Render a PaperRecord into a complete LaTeX document string."""
     if custom_template:
         lower_t = custom_template.lower()
-        forbidden = (r"\write18", r"\input{", r"\openin", r"\read", r"\csname")
+        forbidden = (
+            r"\write18",
+            r"\input{",
+            r"\openin",
+            r"\read",
+            r"\csname",
+            r"\include{",
+            r"\openout",
+            r"\catcode",
+            r"\everypar",
+            r"\immediate",
+        )
         if any(bad in lower_t for bad in forbidden):
             raise ValueError("custom_template contains prohibited LaTeX directive for security")
 
@@ -462,6 +473,32 @@ def compile_latex_to_pdf(
             return False, f"LaTeX compilation error: {e}"
 
 
+_SENSITIVE_PREFIXES = (
+    "/etc",
+    "/bin",
+    "/sbin",
+    "/usr",
+    "/var",
+    "/root",
+    "/boot",
+    "/sys",
+    "/proc",
+    "/dev",
+)
+
+
+def validate_export_dir(output_dir: str | Path | None = None) -> Path:
+    """Ensure export directory is not inside restricted system paths."""
+    if output_dir:
+        target = Path(output_dir).resolve()
+        target_str = str(target)
+        for prefix in _SENSITIVE_PREFIXES:
+            if target_str == prefix or target_str.startswith(prefix + "/"):
+                raise PermissionError(f"Access denied: restricted export path '{target}'")
+        return target
+    return (Path.home() / ".local" / "share" / "artikel-mcp" / "exports").resolve()
+
+
 def export_paper(
     record: PaperRecord,
     *,
@@ -472,11 +509,7 @@ def export_paper(
     custom_template: str | None = None,
 ) -> dict:
     """Export a paper record to LaTeX source (.tex) and optionally compile to PDF."""
-    target_dir = (
-        Path(output_dir).resolve()
-        if output_dir
-        else (Path.home() / ".local" / "share" / "artikel-mcp" / "exports").resolve()
-    )
+    target_dir = validate_export_dir(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
     safe_name = re.sub(r"\W+", "_", record.title or "paper")[:40].strip("_").lower()

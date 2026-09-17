@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import urllib.parse
 
 from artikel_mcp.http import HttpClient, HttpError, get_client
 from artikel_mcp.models import PaperRecord
@@ -21,8 +22,12 @@ class DoajAdapter(SourceAdapter):
         self._client = client or get_client()
 
     def search(self, query: str, limit: int = 10) -> list[PaperRecord]:
+        clean_q = query.strip()
+        if not clean_q:
+            return []
+        encoded = urllib.parse.quote(clean_q, safe="")
         try:
-            raw = self._client.get(BASE + query, params={"pageSize": str(limit)})
+            raw = self._client.get(BASE + encoded, params={"pageSize": str(limit)})
         except HttpError as e:
             raise AdapterError(f"doaj request failed: {e}") from e
         try:

@@ -123,39 +123,59 @@ def extract_markdown(
     data: bytes,
     *,
     force_fallback: bool = False,
+    page_start: int = 0,
+    page_end: int | None = None,
+    max_pages: int = MAX_PDF_PAGES,
 ) -> tuple[str, bool]:
     """Extract PDF text to markdown: pymupdf + custom cleaner, with fallback."""
-    primary = _extract_with_pymupdf(data)
+    primary = _extract_with_pymupdf(
+        data, page_start=page_start, page_end=page_end, max_pages=max_pages
+    )
     if primary and not _is_garbled(primary) and not force_fallback:
         return primary, False
     logger.info("pymupdf output garbled/empty; falling back to pymupdf4llm")
-    md = _extract_with_pymupdf4llm(data)
+    md = _extract_with_pymupdf4llm(
+        data, page_start=page_start, page_end=page_end, max_pages=max_pages
+    )
     return md, True
 
 
-def _extract_with_pymupdf(data: bytes, max_pages: int = MAX_PDF_PAGES) -> str:
+def _extract_with_pymupdf(
+    data: bytes,
+    page_start: int = 0,
+    page_end: int | None = None,
+    max_pages: int = MAX_PDF_PAGES,
+) -> str:
     import pymupdf
 
     doc = pymupdf.open(stream=data, filetype="pdf")
     pages = []
     try:
-        for idx, page in enumerate(doc):
-            if idx >= max_pages:
-                logger.info("reached max page extraction limit (%d pages)", max_pages)
-                break
-            pages.append(page.get_text())
+        total = len(doc)
+        start = max(0, min(page_start, total))
+        end = min(total, page_end if page_end is not None else start + max_pages)
+        for idx in range(start, end):
+            pages.append(doc[idx].get_text())
     finally:
         doc.close()
     return clean_text("\n\n".join(pages))
 
 
-def _extract_with_pymupdf4llm(data: bytes, max_pages: int = MAX_PDF_PAGES) -> str:
+def _extract_with_pymupdf4llm(
+    data: bytes,
+    page_start: int = 0,
+    page_end: int | None = None,
+    max_pages: int = MAX_PDF_PAGES,
+) -> str:
     import pymupdf
     import pymupdf4llm
 
     doc = pymupdf.open(stream=data, filetype="pdf")
     try:
-        page_range = list(range(min(len(doc), max_pages)))
+        total = len(doc)
+        start = max(0, min(page_start, total))
+        end = min(total, page_end if page_end is not None else start + max_pages)
+        page_range = list(range(start, end))
         return pymupdf4llm.to_markdown(doc, pages=page_range)
     finally:
         doc.close()

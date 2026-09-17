@@ -431,6 +431,16 @@ def _format_harvard(record: PaperRecord) -> str:
     return " ".join(c for c in components if c)
 
 
+def escape_bibtex(val: str | None) -> str:
+    """Escape special characters in BibTeX field values."""
+    if not val:
+        return ""
+    text = str(val)
+    text = text.replace("{", "\\{").replace("}", "\\}")
+    text = text.replace("%", "\\%").replace("&", "\\&").replace("_", "\\_")
+    return text
+
+
 def _format_bibtex(record: PaperRecord) -> str:
     first_author = parse_author_name(record.authors[0]).last if record.authors else "item"
     clean_last = re.sub(r"\W+", "", first_author).lower()
@@ -440,21 +450,25 @@ def _format_bibtex(record: PaperRecord) -> str:
     author_field = " and ".join(record.authors) if record.authors else "Anonymous"
     details = _get_pub_details(record)
 
+    entry_type = (record.extra or {}).get("entry_type") or "article"
+    clean_type = re.sub(r"\W+", "", str(entry_type)).lower() or "article"
+
     lines = [
-        f"@article{{{cite_key},",
-        f"  author = {{{author_field}}},",
-        f"  title = {{{record.title}}},",
+        f"@{clean_type}{{{cite_key},",
+        f"  author = {{{escape_bibtex(author_field)}}},",
+        f"  title = {{{escape_bibtex(record.title)}}},",
     ]
     if record.publication:
-        lines.append(f"  journal = {{{record.publication}}},")
+        field_name = "booktitle" if clean_type in ("inproceedings", "conference") else "journal"
+        lines.append(f"  {field_name} = {{{escape_bibtex(record.publication)}}},")
     if record.year:
         lines.append(f"  year = {{{record.year}}},")
     if details["volume"]:
-        lines.append(f"  volume = {{{details['volume']}}},")
+        lines.append(f"  volume = {{{escape_bibtex(details['volume'])}}},")
     if details["issue"]:
-        lines.append(f"  number = {{{details['issue']}}},")
+        lines.append(f"  number = {{{escape_bibtex(details['issue'])}}},")
     if details["pages"]:
-        lines.append(f"  pages = {{{details['pages']}}},")
+        lines.append(f"  pages = {{{escape_bibtex(details['pages'])}}},")
     if record.doi:
         lines.append(f"  doi = {{{record.doi}}},")
     if record.url:

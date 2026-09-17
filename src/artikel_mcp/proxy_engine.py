@@ -150,26 +150,23 @@ class ProxyStore:
         else:
             self.db_path = Path(db_path)
 
-        self._mem_conn: sqlite3.Connection | None = None
-        if str(self.db_path) == ":memory:":
-            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
-            self._mem_conn.row_factory = sqlite3.Row
-        else:
+        if str(self.db_path) != ":memory:":
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._lock = threading.Lock()
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
-        if self._mem_conn is not None:
-            return self._mem_conn
-        conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def close(self) -> None:
+        """Close SQLite database connection."""
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
 
     def _init_db(self) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS proxy_nodes (
                     endpoint      TEXT PRIMARY KEY,
@@ -189,11 +186,11 @@ class ProxyStore:
                 );
                 """
             )
-            conn.commit()
+            self._conn.commit()
 
     def upsert_node(self, node: ProxyNode) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 """
                 INSERT INTO proxy_nodes (
                     endpoint, server, port, uuid, network, security, sni, path, host
@@ -218,7 +215,7 @@ class ProxyStore:
                     node.host,
                 ),
             )
-            conn.commit()
+            self._conn.commit()
 
     def mark_captcha(self, server: str, port: int, hours: float = 24.0) -> None:
         """Flag node as CAPTCHA-blocked for the next N hours (default 24h)."""
@@ -227,8 +224,8 @@ class ProxyStore:
         logger.warning(
             "Proxy %s flagged for CAPTCHA until %.0f (for %.1fh)", endpoint, until, hours
         )
-        with self._lock, self._connect() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 """
                 UPDATE proxy_nodes
                 SET status = 'captcha', captcha_until = ?, fail_count = fail_count + 1
@@ -236,12 +233,12 @@ class ProxyStore:
                 """,
                 (until, endpoint),
             )
-            conn.commit()
+            self._conn.commit()
 
     def mark_failure(self, server: str, port: int) -> None:
         endpoint = f"{server}:{port}"
-        with self._lock, self._connect() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 """
                 UPDATE proxy_nodes
                 SET fail_count = fail_count + 1, status = 'failed', last_used = ?
@@ -249,12 +246,12 @@ class ProxyStore:
                 """,
                 (time.time(), endpoint),
             )
-            conn.commit()
+            self._conn.commit()
 
     def mark_success(self, server: str, port: int, latency_ms: float = 0.0) -> None:
         endpoint = f"{server}:{port}"
-        with self._lock, self._connect() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 """
                 UPDATE proxy_nodes
                 SET fail_count = 0, status = 'active', latency_ms = ?, last_used = ?
@@ -262,13 +259,13 @@ class ProxyStore:
                 """,
                 (latency_ms, time.time(), endpoint),
             )
-            conn.commit()
+            self._conn.commit()
 
     def is_captcha_flagged(self, server: str, port: int) -> bool:
         endpoint = f"{server}:{port}"
         now = time.time()
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
+        with self._lock:
+            row = self._conn.execute(
                 "SELECT captcha_until FROM proxy_nodes WHERE endpoint = ?;",
                 (endpoint,),
             ).fetchone()
@@ -279,8 +276,8 @@ class ProxyStore:
     def get_healthy_nodes(self, limit: int = 50) -> list[ProxyNode]:
         """Fetch nodes not flagged for CAPTCHA, sorted by lowest latency and least recently used."""
         now = time.time()
-        with self._lock, self._connect() as conn:
-            rows = conn.execute(
+        with self._lock:
+            rows = self._conn.execute(
                 """
                 SELECT server, port, uuid, network, security, sni, path, host, latency_ms
                 FROM proxy_nodes

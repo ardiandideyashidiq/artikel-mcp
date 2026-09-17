@@ -46,6 +46,10 @@ class GarudaAdapter(SourceAdapter):
             raise AdapterError(f"garuda request failed: {e}") from e
 
         if 'class="article-item"' not in html:
+            lower = html.lower()
+            empty_indicators = ("tidak ditemukan", "no record", "no result", "empty")
+            if any(ind in lower for ind in empty_indicators):
+                return []
             raise AdapterError("garuda page structure unrecognized; selectors may be stale")
 
         records: list[PaperRecord] = []

@@ -49,7 +49,10 @@ class EuropePmcAdapter(SourceAdapter):
         source_id = f"{it.get('source', 'MED')}:{it.get('id')}"
         pdf = None
         if it.get("pmcid"):
-            pdf = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{it['pmcid']}/pdf/"
+            clean_pmc = str(it["pmcid"]).strip()
+            if clean_pmc.upper().startswith("PMC"):
+                clean_pmc = clean_pmc[3:]
+            pdf = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{clean_pmc}/pdf/"
         else:
             urls = it.get("fullTextUrlList", {}).get("fullTextUrl", [])
             for u in urls:
