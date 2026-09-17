@@ -299,6 +299,28 @@ class PaperCache:
         logger.debug("cache hit %s", key)
         return self._row_to_record(row)
 
+    def delete(self, dedup_key: str) -> bool:
+        """Delete a paper record by dedup_key, DOI, URL, or PDF URL. Returns True if deleted."""
+        key = dedup_key.lower().strip()
+        cur = self._conn.execute(
+            "DELETE FROM papers WHERE dedup_key=? OR lower(doi)=? "
+            "OR lower(url)=? OR lower(pdf_url)=?",
+            (key, key, key, key),
+        )
+        self._conn.commit()
+        deleted = cur.rowcount > 0
+        if deleted:
+            logger.info("deleted paper record matching %s", key)
+        return deleted
+
+    def list_all(self, limit: int = 100, offset: int = 0) -> list[PaperRecord]:
+        """List papers from SQLite cache ordered by updated_at descending."""
+        rows = self._conn.execute(
+            "SELECT * FROM papers ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
     def log_query(
         self,
         raw_query: str,

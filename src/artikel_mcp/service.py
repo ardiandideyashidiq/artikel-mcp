@@ -6,9 +6,17 @@ import logging
 import re
 import time
 from dataclasses import asdict
+from pathlib import Path
 
 from artikel_mcp.bib import collect_parse_errors, parse_bib_file
 from artikel_mcp.cache import PaperCache
+from artikel_mcp.citation import (
+    SUPPORTED_STYLES,
+    format_bibliography,
+    format_in_text,
+    format_reference,
+)
+from artikel_mcp.export import export_paper
 from artikel_mcp.models import PaperRecord
 from artikel_mcp.ojs import OjsArticleMetadata, resolve_and_download_ojs
 from artikel_mcp.pdf import (
@@ -636,4 +644,226 @@ def ingest_bibliography(
         "errors": list(parse_errors),
         "summary": counts,
         "bib_path": str(bib_path),
+    }
+
+
+def add_paper(
+    cache: PaperCache,
+    *,
+    title: str,
+    authors: list[str] | str | None = None,
+    doi: str | None = None,
+    url: str | None = None,
+    publication: str | None = None,
+    year: int | None = None,
+    abstract: str | None = None,
+    research_results: str | None = None,
+    markdown: str | None = None,
+    extra: dict | None = None,
+) -> dict:
+    """Manually add a paper record to SQLite cache and FTS5 index."""
+    if not title or not title.strip():
+        raise ValueError("paper title cannot be empty")
+
+    authors_list: list[str] = []
+    if isinstance(authors, str):
+        authors_list = [a.strip() for a in re.split(r"[,;]|\band\b", authors) if a.strip()]
+    elif isinstance(authors, list):
+        authors_list = [str(a).strip() for a in authors if str(a).strip()]
+
+    source_id = (doi or url or title).strip()
+    rec = PaperRecord(
+        source="manual",
+        source_id=source_id,
+        title=title.strip(),
+        authors=authors_list,
+        doi=doi.strip() if doi else None,
+        url=url.strip() if url else None,
+        publication=publication.strip() if publication else None,
+        year=year,
+        abstract=abstract.strip() if abstract else None,
+        research_results=research_results.strip() if research_results else None,
+        markdown=markdown,
+        extra=extra or {},
+    )
+    key = cache.upsert(rec)
+    if markdown:
+        cache.upsert_markdown(key, markdown)
+
+    view = _record_to_view(rec, idx=1)
+    view["action"] = "created"
+    logger.info("added paper '%s' (key=%s)", rec.title, key)
+    return {
+        "success": True,
+        "key": key,
+        "record": view,
+        "formatted": view["formatted"],
+    }
+
+
+def update_paper(
+    cache: PaperCache,
+    doi_or_key: str,
+    *,
+    title: str | None = None,
+    authors: list[str] | str | None = None,
+    doi: str | None = None,
+    url: str | None = None,
+    publication: str | None = None,
+    year: int | None = None,
+    abstract: str | None = None,
+    research_results: str | None = None,
+    markdown: str | None = None,
+    extra: dict | None = None,
+) -> dict:
+    """Update metadata or notes of an existing paper in SQLite cache and FTS5."""
+    rec = cache.get_by_key(doi_or_key)
+    if not rec:
+        raise ValueError(f"paper '{doi_or_key}' not found in cache")
+
+    if title is not None:
+        rec.title = title.strip()
+    if authors is not None:
+        if isinstance(authors, str):
+            rec.authors = [a.strip() for a in re.split(r"[,;]|\band\b", authors) if a.strip()]
+        elif isinstance(authors, list):
+            rec.authors = [str(a).strip() for a in authors if str(a).strip()]
+    if doi is not None:
+        rec.doi = doi.strip() if doi else None
+    if url is not None:
+        rec.url = url.strip() if url else None
+    if publication is not None:
+        rec.publication = publication.strip() if publication else None
+    if year is not None:
+        rec.year = year
+    if abstract is not None:
+        rec.abstract = abstract.strip() if abstract else None
+    if research_results is not None:
+        rec.research_results = research_results.strip() if research_results else None
+    if markdown is not None:
+        rec.markdown = markdown
+    if extra is not None:
+        rec.extra.update(extra)
+
+    key = cache.upsert(rec)
+    if markdown is not None:
+        cache.upsert_markdown(key, markdown)
+
+    view = _record_to_view(rec, idx=1)
+    view["action"] = "updated"
+    logger.info("updated paper '%s' (key=%s)", rec.title, key)
+    return {
+        "success": True,
+        "key": key,
+        "record": view,
+        "formatted": view["formatted"],
+    }
+
+
+def delete_paper(cache: PaperCache, doi_or_key: str) -> dict:
+    """Delete a paper record from SQLite cache and FTS5 index."""
+    deleted = cache.delete(doi_or_key)
+    if not deleted:
+        return {
+            "success": False,
+            "key": doi_or_key,
+            "message": f"paper '{doi_or_key}' not found in cache",
+        }
+    logger.info("deleted paper '%s'", doi_or_key)
+    return {
+        "success": True,
+        "key": doi_or_key,
+        "message": f"paper '{doi_or_key}' successfully deleted from cache and search index",
+    }
+
+
+def format_paper_citation(
+    cache: PaperCache,
+    doi_or_key: str,
+    *,
+    style: str = "apa7",
+    narrative: bool = False,
+) -> dict:
+    """Format citation for a paper in APA 7th, Chicago, IEEE, MLA 9th, Harvard, or BibTeX."""
+    rec = cache.get_by_key(doi_or_key)
+    if not rec:
+        raise ValueError(f"paper '{doi_or_key}' not found in cache")
+
+    reference_entry = format_reference(rec, style=style)
+    in_text = format_in_text(rec, style=style, narrative=narrative)
+
+    return {
+        "key": doi_or_key,
+        "title": rec.title,
+        "style": style,
+        "reference": reference_entry,
+        "in_text": in_text,
+        "supported_styles": SUPPORTED_STYLES,
+    }
+
+
+def export_paper_document(
+    cache: PaperCache,
+    doi_or_key: str,
+    *,
+    template: str = "academic",
+    style: str = "apa7",
+    compile_pdf: bool = True,
+    output_dir: str | None = None,
+    custom_template: str | None = None,
+) -> dict:
+    """Export a paper into standardized LaTeX source and compile to PDF."""
+    rec = cache.get_by_key(doi_or_key)
+    if not rec:
+        raise ValueError(f"paper '{doi_or_key}' not found in cache")
+
+    return export_paper(
+        rec,
+        template=template,
+        citation_style=style,
+        compile_pdf=compile_pdf,
+        output_dir=output_dir,
+        custom_template=custom_template,
+    )
+
+
+def export_bibliography_file(
+    cache: PaperCache,
+    *,
+    keys: list[str] | None = None,
+    format_type: str = "bibtex",
+    style: str = "apa7",
+    output_path: str | None = None,
+) -> dict:
+    """Export multiple cached papers to BibTeX or formatted text bibliography."""
+    records: list[PaperRecord] = []
+    if keys:
+        for k in keys:
+            r = cache.get_by_key(k)
+            if r:
+                records.append(r)
+    else:
+        records = cache.list_all(limit=500)
+
+    if not records:
+        return {
+            "count": 0,
+            "content": "",
+            "message": "No papers found to export.",
+        }
+
+    formatted = format_bibliography(records, style="bibtex" if format_type == "bibtex" else style)
+
+    if output_path:
+        out_p = Path(output_path).resolve()
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(formatted, encoding="utf-8")
+        logger.info("exported %d papers to %s", len(records), out_p)
+
+    return {
+        "count": len(records),
+        "format": format_type,
+        "style": style if format_type != "bibtex" else "bibtex",
+        "output_path": str(output_path) if output_path else None,
+        "content": formatted,
     }

@@ -55,3 +55,28 @@ The system SHALL return, for every entry, its normalized metadata, a clickable l
 #### Scenario: Mixed outcome batch
 - **WHEN** a single ingest run produces downloaded, cached, and failed entries
 - **THEN** the summary lists each entry with its status, and includes a count of successes and failures
+
+### Requirement: Full CRUD for cached bibliography records
+The system SHALL expose tools to manually create (`add_paper`), update metadata or markdown notes (`update_paper`), and remove (`delete_paper`) papers from the local SQLite cache and FTS5 search index.
+
+#### Scenario: Manual paper creation and update
+- **WHEN** a user adds a manual paper entry or updates an existing paper's notes/metadata
+- **THEN** the record is stored in SQLite and instantly retrievable and searchable via FTS5
+
+#### Scenario: Paper deletion
+- **WHEN** a user deletes a paper by DOI or key
+- **THEN** the paper is purged from both the papers table and the FTS5 virtual table
+
+### Requirement: Citation formatting with academic styles
+The system SHALL format paper citations in standard styles including APA 7th, Chicago (Author-Date and Notes/Bibliography), IEEE, MLA 9th, Harvard, and BibTeX, supporting both full reference entries and in-text parenthetical and narrative citations.
+
+#### Scenario: Generate APA 7th or Chicago citation
+- **WHEN** a user requests a citation for a cached paper in APA 7th or Chicago style
+- **THEN** the system outputs properly styled bibliographic references and in-text citation keys
+
+### Requirement: Standardized LaTeX source and PDF compilation
+The system SHALL export papers into structured LaTeX documents (.tex) and compile them to PDF using system compilers (`pdflatex` or `xelatex`) using predefined templates (`academic`, `review`, `brief`) or user-supplied custom templates to ensure consistent document layout.
+
+#### Scenario: Export paper to academic PDF
+- **WHEN** a user exports a paper with `template="academic"` and `compile_pdf=True`
+- **THEN** the system generates the LaTeX source and compiles a PDF document with consistent typography, metadata banner, abstract, and references

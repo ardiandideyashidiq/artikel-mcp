@@ -7,11 +7,17 @@ from pydantic import Field
 
 from artikel_mcp.cache import PaperCache
 from artikel_mcp.logging import setup_logging
+from artikel_mcp.service import add_paper as service_add_paper
+from artikel_mcp.service import delete_paper as service_delete_paper
 from artikel_mcp.service import download_paper as service_download
+from artikel_mcp.service import export_bibliography_file as service_export_bib
+from artikel_mcp.service import export_paper_document as service_export_paper
+from artikel_mcp.service import format_paper_citation as service_format_citation
 from artikel_mcp.service import get_cached_paper as service_get_cached
 from artikel_mcp.service import get_search_history as service_history
 from artikel_mcp.service import ingest_bibliography as service_ingest
 from artikel_mcp.service import search_papers as service_search
+from artikel_mcp.service import update_paper as service_update_paper
 
 logger = logging.getLogger("artikel_mcp")
 
@@ -283,6 +289,291 @@ def create_server(db_path: str | None = None) -> MCPServer:
         """List historical search queries indexed in the database."""
         history = service_history(cache, query=query, limit=limit)
         return {"count": len(history), "queries": history}
+
+    @mcp.tool(
+        description=(
+            "Manually add a paper record with metadata, abstract, notes, or research results "
+            "directly into the local SQLite database and FTS5 search index. "
+            "USE THIS TOOL to manually catalog papers, add preprints, or record papers "
+            "that were not retrieved through automated search."
+        )
+    )
+    def add_paper(
+        title: Annotated[str, Field(description="Title of the paper.")],
+        authors: Annotated[
+            list[str] | str | None,
+            Field(
+                description="List of author names or comma/and-separated string of authors.",
+            ),
+        ] = None,
+        doi: Annotated[
+            str | None,
+            Field(description="Digital Object Identifier (DOI) of the paper, if any."),
+        ] = None,
+        url: Annotated[
+            str | None,
+            Field(description="Link to the paper or landing page."),
+        ] = None,
+        publication: Annotated[
+            str | None,
+            Field(description="Journal, conference, or publisher name."),
+        ] = None,
+        year: Annotated[
+            int | None,
+            Field(description="Publication year."),
+        ] = None,
+        abstract: Annotated[
+            str | None,
+            Field(description="Abstract of the paper."),
+        ] = None,
+        research_results: Annotated[
+            str | None,
+            Field(description="Summary of key findings, methodologies, or research conclusions."),
+        ] = None,
+        markdown: Annotated[
+            str | None,
+            Field(description="Optional full text or research notes in Markdown."),
+        ] = None,
+    ) -> dict:
+        """Manually add a paper to the local library and search index."""
+        return service_add_paper(
+            cache,
+            title=title,
+            authors=authors,
+            doi=doi,
+            url=url,
+            publication=publication,
+            year=year,
+            abstract=abstract,
+            research_results=research_results,
+            markdown=markdown,
+        )
+
+    @mcp.tool(
+        description=(
+            "Update metadata, research results, abstract, or full-text notes of an existing "
+            "paper in the local database and full-text search index. "
+            "USE THIS TOOL to correct metadata, attach personal notes, or refine paper summaries."
+        )
+    )
+    def update_paper(
+        doi_or_key: Annotated[
+            str,
+            Field(description="DOI or internal dedup_key of the paper to update."),
+        ],
+        title: Annotated[
+            str | None,
+            Field(description="Updated title (optional)."),
+        ] = None,
+        authors: Annotated[
+            list[str] | str | None,
+            Field(description="Updated author list or string (optional)."),
+        ] = None,
+        doi: Annotated[
+            str | None,
+            Field(description="Updated DOI (optional)."),
+        ] = None,
+        url: Annotated[
+            str | None,
+            Field(description="Updated URL (optional)."),
+        ] = None,
+        publication: Annotated[
+            str | None,
+            Field(description="Updated publication/journal name (optional)."),
+        ] = None,
+        year: Annotated[
+            int | None,
+            Field(description="Updated publication year (optional)."),
+        ] = None,
+        abstract: Annotated[
+            str | None,
+            Field(description="Updated abstract (optional)."),
+        ] = None,
+        research_results: Annotated[
+            str | None,
+            Field(description="Updated research results or findings summary (optional)."),
+        ] = None,
+        markdown: Annotated[
+            str | None,
+            Field(description="Updated full-text Markdown or notes (optional)."),
+        ] = None,
+    ) -> dict:
+        """Update an existing paper's metadata or notes in the local library."""
+        return service_update_paper(
+            cache,
+            doi_or_key,
+            title=title,
+            authors=authors,
+            doi=doi,
+            url=url,
+            publication=publication,
+            year=year,
+            abstract=abstract,
+            research_results=research_results,
+            markdown=markdown,
+        )
+
+    @mcp.tool(
+        description=(
+            "Delete a paper permanently from the local SQLite cache and FTS5 search index. "
+            "USE THIS TOOL to remove irrelevant papers, clean duplicates, or prune your library."
+        )
+    )
+    def delete_paper(
+        doi_or_key: Annotated[
+            str,
+            Field(description="DOI or key of the paper to delete."),
+        ],
+    ) -> dict:
+        """Delete a paper from the local library."""
+        return service_delete_paper(cache, doi_or_key)
+
+    @mcp.tool(
+        description=(
+            "Format a paper's citation in standard academic styles (APA 7th, Chicago 18th "
+            "Author-Date, Chicago Notes & Bibliography, IEEE, MLA 9th, Harvard, or BibTeX). "
+            "Returns both the bibliographic reference entry and in-text parenthetical/narrative "
+            "citation. USE THIS TOOL whenever you need to cite a paper or generate references."
+        )
+    )
+    def format_citation(
+        doi_or_key: Annotated[
+            str,
+            Field(description="DOI or key of the paper in the local library."),
+        ],
+        style: Annotated[
+            str,
+            Field(
+                description=(
+                    "Citation style: 'apa7' (default), 'chicago' (Author-Date), 'chicago_notes', "
+                    "'ieee', 'mla', 'harvard', or 'bibtex'."
+                ),
+            ),
+        ] = "apa7",
+        narrative: Annotated[
+            bool,
+            Field(
+                description=(
+                    "If True, formats in-text citation in narrative style (e.g. 'Smith (2020)' "
+                    "instead of '(Smith, 2020)')."
+                ),
+            ),
+        ] = False,
+    ) -> dict:
+        """Format a paper's reference and in-text citation in standard styles."""
+        return service_format_citation(cache, doi_or_key, style=style, narrative=narrative)
+
+    @mcp.tool(
+        description=(
+            "Export an academic paper to a standardized LaTeX source file (.tex) and compile "
+            "it to a professional PDF document. Supports standardized templates ('academic', "
+            "'review', 'brief') or a custom LaTeX template string so that every generated "
+            "PDF follows the exact same professional format. "
+            "USE THIS TOOL to produce publication-ready PDF reports or literature dossiers."
+        )
+    )
+    def export_paper(
+        doi_or_key: Annotated[
+            str,
+            Field(description="DOI or key of the paper to export."),
+        ],
+        template: Annotated[
+            str,
+            Field(
+                description=(
+                    "Template format: 'academic' (standard paper layout), "
+                    "'review' (literature review/dossier with findings box), "
+                    "or 'brief' (executive research brief)."
+                ),
+            ),
+        ] = "academic",
+        style: Annotated[
+            str,
+            Field(
+                description="Citation style for the references section ('apa7', 'chicago', etc.).",
+            ),
+        ] = "apa7",
+        compile_pdf: Annotated[
+            bool,
+            Field(
+                description=(
+                    "If True (default), compiles the LaTeX code to PDF using system compiler."
+                ),
+            ),
+        ] = True,
+        output_dir: Annotated[
+            str | None,
+            Field(description="Optional custom directory path to save the .tex and .pdf files."),
+        ] = None,
+        custom_template: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Optional raw LaTeX template string with {{title}}, {{authors}}, "
+                    "{{publication}}, {{year}}, {{doi}}, {{abstract}}, {{findings}}, "
+                    "{{body}}, {{reference}} placeholders."
+                ),
+            ),
+        ] = None,
+    ) -> dict:
+        """Export a paper into standardized LaTeX source and compile to PDF."""
+        return service_export_paper(
+            cache,
+            doi_or_key,
+            template=template,
+            style=style,
+            compile_pdf=compile_pdf,
+            output_dir=output_dir,
+            custom_template=custom_template,
+        )
+
+    @mcp.tool(
+        description=(
+            "Export cached papers to a BibTeX (.bib) file or formatted bibliography list "
+            "(APA 7th, Chicago, IEEE, MLA, Harvard). "
+            "Can export specific papers by keys or the entire local library. "
+            "USE THIS TOOL to export citations for LaTeX/Overleaf or to generate reference lists."
+        )
+    )
+    def export_bibliography(
+        keys: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "Optional list of DOIs/keys to export. If omitted, exports all cached papers."
+                ),
+            ),
+        ] = None,
+        format_type: Annotated[
+            str,
+            Field(
+                description="Output format: 'bibtex' (default), 'text', or 'markdown'.",
+            ),
+        ] = "bibtex",
+        style: Annotated[
+            str,
+            Field(
+                description=(
+                    "Citation style when format_type is 'text'/'markdown' "
+                    "('apa7', 'chicago', 'ieee', etc.)."
+                ),
+            ),
+        ] = "apa7",
+        output_path: Annotated[
+            str | None,
+            Field(
+                description="Optional file path to save bibliography (e.g. '/path/to/refs.bib').",
+            ),
+        ] = None,
+    ) -> dict:
+        """Export papers to BibTeX or formatted reference bibliography."""
+        return service_export_bib(
+            cache,
+            keys=keys,
+            format_type=format_type,
+            style=style,
+            output_path=output_path,
+        )
 
     # Register MCP Resources
     @mcp.resource("paper://{+key}", description="Full metadata and cached markdown for a paper")
