@@ -53,8 +53,10 @@ guaranteed structured output, automatic query logging, SQLite/FTS5 caching, and 
 
 ```bash
 uv sync            # install dependencies
-uv run pytest              # offline suite (currently 57 tests)
-uv run pytest -m network   # live tests hitting real APIs (skipped by default)
+uv run pytest              # offline suite (currently 131 tests)
+uv run pytest -m network   # live tests hitting real APIs + stdio protocol round-trip (skipped by default)
+uv run pytest tests/test_tool_smoke.py -v   # tool/resource/prompt inventory + full lifecycle (offline)
+uv run pytest -m network tests/test_tool_protocol.py -v  # JSON-RPC over a real stdio MCP client
 uv run ruff check src/ tests/
 uv run ruff format src/ tests/
 ```

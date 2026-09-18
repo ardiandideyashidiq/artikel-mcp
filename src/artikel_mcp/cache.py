@@ -43,7 +43,7 @@ class SearchResult:
     errors: list[str] = field(default_factory=list)
 
 
-_SCHEMA = """
+_TABLES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
     dedup_key   TEXT PRIMARY KEY,
     source      TEXT NOT NULL,
@@ -64,32 +64,6 @@ CREATE TABLE IF NOT EXISTS papers (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_papers_doi ON papers(doi);
-CREATE INDEX IF NOT EXISTS idx_papers_citekey ON papers(citekey);
-CREATE INDEX IF NOT EXISTS idx_papers_url ON papers(url);
-CREATE INDEX IF NOT EXISTS idx_papers_pdf_url ON papers(pdf_url);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
-    title, abstract, markdown, content='papers', content_rowid='rowid'
-);
-
-CREATE TRIGGER IF NOT EXISTS papers_ai AFTER INSERT ON papers BEGIN
-    INSERT INTO papers_fts(rowid, title, abstract, markdown)
-    VALUES (new.rowid, new.title, coalesce(new.abstract, ''), coalesce(new.markdown, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS papers_ad AFTER DELETE ON papers BEGIN
-    INSERT INTO papers_fts(papers_fts, rowid, title, abstract, markdown)
-    VALUES ('delete', old.rowid, old.title, coalesce(old.abstract, ''), coalesce(old.markdown, ''));
-END;
-
-CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE ON papers BEGIN
-    INSERT INTO papers_fts(papers_fts, rowid, title, abstract, markdown)
-    VALUES ('delete', old.rowid, old.title, coalesce(old.abstract, ''), coalesce(old.markdown, ''));
-    INSERT INTO papers_fts(rowid, title, abstract, markdown)
-    VALUES (new.rowid, new.title, coalesce(new.abstract, ''), coalesce(new.markdown, ''));
-END;
-
 CREATE TABLE IF NOT EXISTS search_queries (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     raw_query       TEXT NOT NULL,
@@ -101,9 +75,6 @@ CREATE TABLE IF NOT EXISTS search_queries (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_search_queries_created ON search_queries(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_search_queries_raw ON search_queries(raw_query);
-
 CREATE TABLE IF NOT EXISTS query_papers (
     query_id        INTEGER NOT NULL,
     paper_key       TEXT NOT NULL,
@@ -112,7 +83,15 @@ CREATE TABLE IF NOT EXISTS query_papers (
     FOREIGN KEY (query_id) REFERENCES search_queries(id) ON DELETE CASCADE,
     FOREIGN KEY (paper_key) REFERENCES papers(dedup_key) ON DELETE CASCADE
 );
+"""
 
+_INDICES_SCHEMA = """
+CREATE INDEX IF NOT EXISTS idx_papers_doi ON papers(doi);
+CREATE INDEX IF NOT EXISTS idx_papers_citekey ON papers(citekey);
+CREATE INDEX IF NOT EXISTS idx_papers_url ON papers(url);
+CREATE INDEX IF NOT EXISTS idx_papers_pdf_url ON papers(pdf_url);
+CREATE INDEX IF NOT EXISTS idx_search_queries_created ON search_queries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_search_queries_raw ON search_queries(raw_query);
 CREATE INDEX IF NOT EXISTS idx_query_papers_key ON query_papers(paper_key);
 """
 
@@ -132,8 +111,9 @@ class PaperCache:
                 self._conn.execute("PRAGMA busy_timeout=5000;")
             except Exception as e:
                 logger.debug("Failed to set PRAGMA journal_mode: %s", e)
-            self._conn.executescript(_SCHEMA)
+            self._conn.executescript(_TABLES_SCHEMA)
             self._migrate()
+            self._conn.executescript(_INDICES_SCHEMA)
         logger.debug("cache opened at %s", self.path)
 
     def _extract_citekey(self, record: PaperRecord) -> str:
@@ -146,7 +126,7 @@ class PaperCache:
         return f"{clean_last}{year}"
 
     def _migrate(self) -> None:
-        """Ensure columns and FTS definition match current version."""
+        """Ensure columns, citekeys, and FTS definition match current version."""
         cols = [r[1] for r in self._conn.execute("PRAGMA table_info(papers)").fetchall()]
         if "markdown" not in cols:
             self._conn.execute("ALTER TABLE papers ADD COLUMN markdown TEXT")
@@ -158,8 +138,26 @@ class PaperCache:
             self._conn.execute("ALTER TABLE papers ADD COLUMN research_results TEXT")
         if "citekey" not in cols:
             self._conn.execute("ALTER TABLE papers ADD COLUMN citekey TEXT")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_papers_citekey ON papers(citekey)")
         self._conn.commit()
+
+        # Backfill citekey for existing rows where missing
+        rows = self._conn.execute(
+            "SELECT rowid, authors, year FROM papers WHERE citekey IS NULL OR citekey = ''"
+        ).fetchall()
+        if rows:
+            updates = []
+            for r in rows:
+                authors = json.loads(r["authors"] or "[]")
+                if authors:
+                    last = parse_author_name(authors[0]).last
+                    clean_last = re.sub(r"\W+", "", last).lower()
+                else:
+                    clean_last = "item"
+                year = str(r["year"]) if r["year"] else "nodate"
+                updates.append((f"{clean_last}{year}", r["rowid"]))
+            self._conn.executemany("UPDATE papers SET citekey = ? WHERE rowid = ?", updates)
+            self._conn.commit()
+            logger.info("backfilled citekey for %d existing cached papers", len(updates))
 
         fts_cols = [r[1] for r in self._conn.execute("PRAGMA table_info(papers_fts)").fetchall()]
         if "markdown" not in fts_cols:

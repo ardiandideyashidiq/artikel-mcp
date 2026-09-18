@@ -78,3 +78,50 @@ def test_local_fts_recall_multi_token(cache):
     hits = cache.search("status hukum deepfake di indonesia", adapted=True)
     assert len(hits) == 2
     assert {h.source_id for h in hits} == {"a1", "a2"}
+
+
+def test_cache_migration_from_old_schema_without_citekey(tmp_path):
+    """Ensure opening an old database without citekey column migrates and backfills cleanly."""
+    import sqlite3
+
+    db_file = tmp_path / "legacy_papers.db"
+    conn = sqlite3.connect(db_file)
+    # Create legacy schema missing citekey
+    conn.execute(
+        """
+        CREATE TABLE papers (
+            dedup_key   TEXT PRIMARY KEY,
+            source      TEXT NOT NULL,
+            source_id   TEXT NOT NULL,
+            doi         TEXT,
+            title       TEXT NOT NULL,
+            authors     TEXT NOT NULL DEFAULT '[]',
+            abstract    TEXT,
+            year        INTEGER,
+            pdf_url     TEXT,
+            raw_json    TEXT,
+            fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO papers (dedup_key, source, source_id, title, authors, year)
+        VALUES ('legacy:1', 'manual', '1', 'Legacy Paper', '["John Doe"]', 2021);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    # Opening with PaperCache must not crash and must migrate columns, backfill citekey, and index
+    cache = PaperCache(db_file)
+    paper = cache.get_by_key("legacy:1")
+    assert paper is not None
+    assert paper.title == "Legacy Paper"
+
+    # Verify citekey was backfilled and is queryable
+    paper_by_citekey = cache.get_by_key("doe2021")
+    assert paper_by_citekey is not None
+    assert paper_by_citekey.title == "Legacy Paper"
+    cache.close()

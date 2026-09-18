@@ -6,8 +6,12 @@ MCP server for academic paper workflows: multi-index scholarly search, SQLite/FT
 
 ```bash
 uv sync                      # install deps (dev group: pytest, ruff)
-uv run pytest                # offline suite (currently 57 tests)
-uv run pytest -m network     # live tests hitting real APIs (skipped by default)
+uv run pytest                # offline suite (currently 131 tests)
+uv run pytest -m network     # live tests hitting real APIs + stdio protocol round-trip
+                             #   (test_tool_protocol.py spawns the real server over stdio,
+                             #    runs offline-safe calls, and one live CrossRef search)
+uv run pytest tests/test_tool_smoke.py -v   # tool/resource/prompt inventory + lifecycle (offline)
+uv run pytest -m network tests/test_tool_protocol.py -v  # JSON-RPC over real stdio client
 uv run ruff check src/ tests/
 uv run ruff format src/ tests/
 uv run artikel-mcp           # run the server (stdio transport); entry src/artikel_mcp/server.py:main
