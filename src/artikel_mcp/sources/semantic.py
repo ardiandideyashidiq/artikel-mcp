@@ -55,7 +55,7 @@ class SemanticAdapter(SourceAdapter):
                     "semantic scholar rate limited (HTTP 429). "
                     "Configure SEMANTIC_SCHOLAR_API_KEY for higher quotas."
                 )
-                return []
+                raise AdapterError(f"semantic scholar rate limited: {e}") from e
             raise AdapterError(f"semantic scholar request failed: {e}") from e
 
         try:

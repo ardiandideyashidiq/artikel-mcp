@@ -66,7 +66,7 @@ class OpenAlexAdapter(SourceAdapter):
                     "Configure OPENALEX_API_KEY for priority access.",
                     e,
                 )
-                return []
+                raise AdapterError(f"openalex rate-limited or unavailable: {e}") from e
             raise AdapterError(f"openalex request failed: {e}") from e
 
         try:

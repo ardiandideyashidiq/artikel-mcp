@@ -120,7 +120,9 @@ _QUERY_LIMIT_SUFFIX_RE = re.compile(
 )
 
 _DOI_RE = re.compile(
-    r"(?:https?://(?:dx\.)?doi\.org/)?(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", re.IGNORECASE
+    r"(?:https?://(?:dx\.)?doi\.org/)?"
+    r"(10\.\d{4,9}/[-._;/:A-Za-z0-9]*(?:\([^)]*\)[-._;/:A-Za-z0-9]*)*)",
+    re.IGNORECASE,
 )
 _ARXIV_ID_RE = re.compile(
     r"(?:https?://arxiv\.org/(?:abs|pdf)/)?(?:arxiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)",
@@ -163,7 +165,7 @@ def extract_identifier(query: str) -> dict[str, str] | None:
     stripped = query.strip()
     doi_m = _DOI_RE.search(stripped)
     if doi_m:
-        return {"type": "doi", "value": doi_m.group(1)}
+        return {"type": "doi", "value": doi_m.group(1).rstrip(".,")}
     arxiv_m = _ARXIV_ID_RE.search(stripped)
     if arxiv_m:
         return {"type": "arxiv", "value": arxiv_m.group(1)}

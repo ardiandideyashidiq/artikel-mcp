@@ -19,12 +19,12 @@ def test_registry_search_all_parameter_normalization(monkeypatch):
 
     monkeypatch.setattr(registry, "_search_source", mock_search_source)
 
-    # 1. Default (None) includes all supported sources (including scholar)
+    # 1. Default (None) excludes scholar unless GOOGLE_SCHOLAR_DEFAULT=1 (opt-in)
     called_sources.clear()
     recs, errs = registry.search_all("test query")
-    assert "scholar" in called_sources
-    assert set(called_sources) == set(registry.supported_sources())
-    assert len(recs) == len(registry.supported_sources())
+    assert "scholar" not in called_sources
+    assert set(called_sources) == set(registry.default_sources())
+    assert len(recs) == len(registry.default_sources())
 
     # 2. String "all"
     called_sources.clear()
@@ -66,11 +66,11 @@ def test_service_search_papers_source_all_and_default(tmp_path, monkeypatch):
 
     monkeypatch.setattr(registry, "search_all", mock_search_all)
 
-    # 1. Default invocation (no source/sources arg) -> queries all including scholar
+    # 1. Default invocation (no source/sources arg) -> default sources (scholar opt-in)
     res_default = search_papers(cache, "status hukum deepfake", force_refresh=True)
     assert res_default["from_local"] is False
-    assert "scholar" in res_default["sources_queried"]
-    assert set(res_default["sources_queried"]) == set(registry.supported_sources())
+    assert "scholar" not in res_default["sources_queried"]
+    assert set(res_default["sources_queried"]) == set(registry.default_sources())
 
     # 2. Explicit source="all"
     res_source_all = search_papers(cache, "status hukum deepfake", source="all", force_refresh=True)

@@ -30,6 +30,7 @@ from artikel_mcp.export import export_paper
 from artikel_mcp.models import PaperRecord
 from artikel_mcp.ojs import OjsArticleMetadata, resolve_and_download_ojs
 from artikel_mcp.pdf import (
+    PDF_MAGIC,
     PdfError,
     download_pdf,
     extract_markdown,
@@ -328,7 +329,8 @@ def search_papers(
     if ident and not force_refresh:
         val = ident["value"]
         cached = cache.get_by_key(val)
-        if cached:
+        if cached is None and ident["type"] == "arxiv":
+            cached = cache.get_by_key(f"arxiv:{val}")
             d = _record_to_view(cached, idx=1)
             docs.append(d)
             paper_keys.append(cached.dedup_key())
@@ -487,8 +489,10 @@ def download_paper(
                 "title": cached.title,
                 "authors": cached.authors,
                 "publication": cached.publication,
+                "via_openalex": False,
                 "via_unpaywall": False,
                 "used_fallback": False,
+                "is_ojs": False,
                 "from_cache": True,
                 "is_truncated": is_truncated,
                 "char_count": len(cached.markdown),
@@ -522,6 +526,10 @@ def download_paper(
         except Exception as e:
             logger.info("OJS resolver failed for %s (%s)", target_for_resolver, e)
 
+    # Central sanity check: any body we continue with must actually be a PDF
+    if body is not None and not body.startswith(PDF_MAGIC):
+        raise PdfError(f"resolved content is not a PDF: {final_pdf_url or target_for_resolver}")
+
     # 3. OpenAlex Open Access fallback if DOI is available (free, keyless)
     if not body and doi:
         try:
@@ -552,16 +560,13 @@ def download_paper(
             f"(target: {target_for_resolver})"
         )
 
-    try:
-        md, used_fallback = extract_markdown(
-            body,
-            force_fallback=force_fallback,
-            page_start=page_start,
-            page_end=page_end,
-            max_pages=max_pages,
-        )
-    except TypeError:
-        md, used_fallback = extract_markdown(body, force_fallback=force_fallback)
+    md, used_fallback = extract_markdown(
+        body,
+        force_fallback=force_fallback,
+        page_start=page_start,
+        page_end=page_end,
+        max_pages=max_pages,
+    )
 
     # Cache enrichment: persist record and markdown into SQLite
     rec = cached or PaperRecord(

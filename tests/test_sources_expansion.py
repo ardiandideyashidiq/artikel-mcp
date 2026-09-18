@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from artikel_mcp.cache import PaperCache
 from artikel_mcp.pdf import resolve_pdf_with_openalex
 from artikel_mcp.query_broker import adapt
 from artikel_mcp.service import download_paper
 from artikel_mcp.sources import registry
+from artikel_mcp.sources.base import AdapterError
 from artikel_mcp.sources.openalex import OpenAlexAdapter, _reconstruct_abstract
 from artikel_mcp.sources.pubmed import PubmedAdapter
 from artikel_mcp.sources.semantic import SemanticAdapter
@@ -188,13 +191,13 @@ def test_semantic_adapter_mapping_and_rate_limit():
     assert papers[0].doi == "10.1000/182"
     assert papers[0].extra.get("citation_count") == 50000
 
-    # Rate limit test (HTTP 429) degrades gracefully without exception
+    # Rate limit test (HTTP 429) surfaces as an AdapterError, not silent [])
     rate_limited_client = FakeHttpClient(
         {"api.semanticscholar.org/graph/v1/paper/search": (b"Rate limit exceeded", 429)}
     )
     adapter_rl = SemanticAdapter(client=rate_limited_client)
-    res = adapter_rl.search("deep learning", limit=5)
-    assert res == []
+    with pytest.raises(AdapterError, match="rate limited"):
+        adapter_rl.search("deep learning", limit=5)
 
 
 def test_resolve_pdf_with_openalex():

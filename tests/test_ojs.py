@@ -154,7 +154,7 @@ def test_download_paper_service_resolves_ojs_and_enriches_cache(tmp_path, monkey
     monkeypatch.setattr("artikel_mcp.ojs.get_client", lambda: FakeClient())
     monkeypatch.setattr(
         "artikel_mcp.service.extract_markdown",
-        lambda body, force_fallback=False: (
+        lambda body, **kwargs: (
             "# Extracted OJS Full Text\n\nElection crimes and AI analysis.",
             False,
         ),
@@ -241,7 +241,7 @@ def test_doaj_article_url_resolution(tmp_path, monkeypatch):
     monkeypatch.setattr("artikel_mcp.ojs.get_client", lambda: FakeClient())
     monkeypatch.setattr(
         "artikel_mcp.service.extract_markdown",
-        lambda body, force_fallback=False: ("# DOAJ Full Text", False),
+        lambda body, **kwargs: ("# DOAJ Full Text", False),
     )
 
     result = download_paper(
@@ -300,7 +300,7 @@ def test_ojs_direct_download_enriches_from_view_page(tmp_path, monkeypatch):
     monkeypatch.setattr("artikel_mcp.ojs.get_client", lambda: FakeClient())
     monkeypatch.setattr(
         "artikel_mcp.service.extract_markdown",
-        lambda body, force_fallback=False: ("# JIHHP Full Text", False),
+        lambda body, **kwargs: ("# JIHHP Full Text", False),
     )
 
     result = download_paper(

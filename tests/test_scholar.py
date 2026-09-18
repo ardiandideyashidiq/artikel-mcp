@@ -232,9 +232,13 @@ def test_registry_integration(monkeypatch):
     assert "scholar" in registry.supported_sources()
     assert registry.is_supported("scholar")
 
-    # By default, scholar is included in default_sources backed by proxy rotation
+    # Scholar is opt-in by default (scrapes an anti-bot HTML endpoint)
     defaults = registry.default_sources()
-    assert "scholar" in defaults
+    assert "scholar" not in defaults
+
+    monkeypatch.setenv("GOOGLE_SCHOLAR_DEFAULT", "1")
+    assert "scholar" in registry.default_sources()
+    monkeypatch.delenv("GOOGLE_SCHOLAR_DEFAULT")
 
     # Mock Scholar search so offline test stays fast and never touches network
     monkeypatch.setattr(

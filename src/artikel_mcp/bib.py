@@ -21,7 +21,7 @@ from artikel_mcp.query_broker import extract_identifier
 logger = logging.getLogger("artikel_mcp.bib")
 
 _AUTHOR_SPLIT_RE = re.compile(r"\s+and\s+", re.IGNORECASE)
-_YEAR_RE = re.compile(r"\d{4}")
+_YEAR_RE = re.compile(r"\b(19\d\d|20\d\d)\b")
 
 
 class BibFileError(RuntimeError):

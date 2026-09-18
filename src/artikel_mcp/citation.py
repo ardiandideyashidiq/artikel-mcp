@@ -139,7 +139,11 @@ def format_in_text(
     style: str = "apa7",
     narrative: bool = False,
 ) -> str:
-    """Format in-text parenthetical or narrative citation."""
+    """Format in-text parenthetical or narrative citation.
+
+    Note: IEEE style emits a ``[1]`` placeholder; the final number is assigned
+    by the surrounding bibliography, not computed here.
+    """
     style_norm = style.lower().replace("-", "").replace(" ", "").replace("_", "")
     authors = [parse_author_name(a) for a in record.authors if a.strip()]
     year_str = str(record.year) if record.year else "n.d."

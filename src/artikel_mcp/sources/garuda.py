@@ -81,7 +81,7 @@ class GarudaAdapter(SourceAdapter):
                     doi=None,
                     url=url,
                     publication=publication,
-                    abstract=f"Artikel terindeks pada Garuda Kemdiktisaintek: {publication}.",
+                    abstract=None,
                     year=year,
                     pdf_url=pdf.group(1) if pdf else None,
                     extra={"detail_url": url, "journal": publication},

@@ -73,7 +73,7 @@ class PmcAdapter(SourceAdapter):
         if not title:
             raise AdapterError("missing title")
         article_ids = {a["idtype"]: a["value"] for a in entry.get("articleids", [])}
-        pmcid = article_ids.get("pmcid")
+        pmcid = article_ids.get("pmcid") or article_ids.get("pmc")
         doi = _extract_doi(article_ids, entry)
         pdf = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/" if pmcid else None
         source_id = pmcid if pmcid else uid
@@ -91,7 +91,7 @@ class PmcAdapter(SourceAdapter):
             doi=doi,
             url=url,
             publication=publication,
-            abstract=f"Artikel terindeks di PubMed Central: {publication}.",
+            abstract=None,
             year=(
                 int(re.search(r"\b(19\d\d|20\d\d)\b", str(entry.get("pubdate") or "")).group(1))
                 if re.search(r"\b(19\d\d|20\d\d)\b", str(entry.get("pubdate") or ""))

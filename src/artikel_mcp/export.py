@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from artikel_mcp.citation import format_reference
+from artikel_mcp.doc_citation import validate_safe_path
 from artikel_mcp.models import PaperRecord
 
 logger = logging.getLogger("artikel_mcp.export")
@@ -129,11 +130,11 @@ def markdown_to_latex(md: str) -> str:
             out.append(f"  \\item {item_text}")
             continue
 
-        # If not a list item, close any open list
-        if in_itemize and not stripped:
+        # Not a list item: close any open list environment before other content
+        if in_itemize:
             out.append(r"\end{itemize}")
             in_itemize = False
-        elif in_enumerate and not stripped:
+        if in_enumerate:
             out.append(r"\end{enumerate}")
             in_enumerate = False
 
@@ -161,51 +162,52 @@ def markdown_to_latex(md: str) -> str:
 
 
 def _inline_markdown_to_latex(text: str) -> str:
-    """Format bold, italic, code, and links within a text line."""
-    # First protect inline math if any
-    math_placeholders: list[str] = []
+    """Format bold, italic, code, math, and links within a text line."""
+    # Protect math, code spans, and markdown links using NUL-delimited tokens
+    # that escape_latex cannot alter (it only rewrites [\\&%$#_{}~^]).
+    protected: list[str] = []
 
-    def _math_sub(m):
-        math_placeholders.append(m.group(0))
-        return f"__MATH_{len(math_placeholders) - 1}__"
+    def _protect(m):
+        protected.append(m.group(0))
+        return f"\x00{len(protected) - 1}\x00"
 
-    text = re.sub(r"\$[^$]+\$", _math_sub, text)
+    # Inline math: $...$
+    text = re.sub(r"\$[^$]+\$", _protect, text)
+    # Code spans: `code`
+    text = re.sub(r"`([^`]+)`", _protect, text)
+    # Markdown links: [label](url)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _protect, text)
 
-    # Protect code spans
-    code_placeholders: list[str] = []
-
-    def _code_sub(m):
-        code_placeholders.append(m.group(1))
-        return f"__CODE_{len(code_placeholders) - 1}__"
-
-    text = re.sub(r"`([^`]+)`", _code_sub, text)
-
-    # Escape plain characters
+    # Escape the remaining plain characters
     text = escape_latex(text)
-
-    # Restore code
-    for i, c in enumerate(code_placeholders):
-        text = text.replace(f"__CODE_{i}__", f"\\texttt{{{escape_latex(c)}}}")
-
-    # Restore math
-    for i, m in enumerate(math_placeholders):
-        text = text.replace(f"__MATH_{i}__", m)
 
     # Bold: **text** or __text__
     text = re.sub(r"\*\*([^*]+)\*\*", r"\\textbf{\1}", text)
     # Italic: *text* or _text_
     text = re.sub(r"(?<!\\)\*([^*]+)\*", r"\\textit{\1}", text)
 
-    # Markdown links: [text](url)
-    def _link_sub(m):
-        lbl = m.group(1)
-        url = m.group(2)
-        return f"\\href{{{url}}}{{{lbl}}}"
-
-    text = re.sub(r"\\\[([^\]]+)\\\]\(([^)]+)\)", _link_sub, text)
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _link_sub, text)
+    for i, original in enumerate(protected):
+        token = f"\x00{i}\x00"
+        if original.startswith("$"):
+            replacement = original  # math passes through untouched
+        elif original.startswith("`"):
+            replacement = f"\\texttt{{{escape_latex(original[1:-1])}}}"
+        else:
+            m = re.match(r"\[([^\]]+)\]\(([^)]+)\)", original)
+            lbl = escape_latex(m.group(1))
+            url = _escape_url(m.group(2))
+            replacement = f"\\href{{{url}}}{{{lbl}}}"
+        text = text.replace(token, replacement)
 
     return text
+
+
+_URL_ESCAPE_RE = re.compile(r"([%#])")
+
+
+def _escape_url(url: str) -> str:
+    """Escape characters that break \\href URL arguments in LaTeX."""
+    return _URL_ESCAPE_RE.sub(r"\\\1", url)
 
 
 TEMPLATES = {
@@ -360,15 +362,19 @@ def render_latex(
         lower_t = custom_template.lower()
         forbidden = (
             r"\write18",
-            r"\input{",
+            r"\write",
+            r"\input",
+            r"\include",
             r"\openin",
+            r"\openout",
             r"\read",
             r"\csname",
-            r"\include{",
-            r"\openout",
             r"\catcode",
             r"\everypar",
             r"\immediate",
+            r"\special",
+            r"\let",
+            r"\endinput",
         )
         if any(bad in lower_t for bad in forbidden):
             raise ValueError("custom_template contains prohibited LaTeX directive for security")
@@ -430,7 +436,7 @@ def compile_latex_to_pdf(
     if not available_compiler:
         return False, f"LaTeX compiler ({compilers}) not found on system."
 
-    out_path = Path(output_pdf_path).resolve()
+    out_path = validate_safe_path(output_pdf_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -450,7 +456,11 @@ def compile_latex_to_pdf(
             # Run twice for cross-references and header layouts
             res = subprocess.run(cmd, cwd=tmp_dir, capture_output=True, text=True, timeout=60)
             if res.returncode == 0:
-                subprocess.run(cmd, cwd=tmp_dir, capture_output=True, text=True, timeout=60)
+                res2 = subprocess.run(cmd, cwd=tmp_dir, capture_output=True, text=True, timeout=60)
+                if res2.returncode != 0:
+                    log_snippet = res2.stdout[-1000:] if res2.stdout else "Second LaTeX pass failed"
+                    logger.warning("latex second-pass compilation error: %s", log_snippet)
+                    return False, f"Compilation error: {log_snippet}"
             else:
                 log_snippet = res.stdout[-1000:] if res.stdout else "Compilation failed"
                 logger.warning("latex compilation error: %s", log_snippet)
@@ -473,29 +483,10 @@ def compile_latex_to_pdf(
             return False, f"LaTeX compilation error: {e}"
 
 
-_SENSITIVE_PREFIXES = (
-    "/etc",
-    "/bin",
-    "/sbin",
-    "/usr",
-    "/var",
-    "/root",
-    "/boot",
-    "/sys",
-    "/proc",
-    "/dev",
-)
-
-
 def validate_export_dir(output_dir: str | Path | None = None) -> Path:
     """Ensure export directory is not inside restricted system paths."""
     if output_dir:
-        target = Path(output_dir).resolve()
-        target_str = str(target)
-        for prefix in _SENSITIVE_PREFIXES:
-            if target_str == prefix or target_str.startswith(prefix + "/"):
-                raise PermissionError(f"Access denied: restricted export path '{target}'")
-        return target
+        return validate_safe_path(output_dir)
     return (Path.home() / ".local" / "share" / "artikel-mcp" / "exports").resolve()
 
 

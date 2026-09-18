@@ -26,10 +26,6 @@ logger = logging.getLogger("artikel_mcp.sources.scholar")
 SCHOLAR_URL = "https://scholar.google.com/scholar"
 
 # Regular expressions for Google Scholar HTML parsing
-_RESULT_ITEM_RE = re.compile(
-    r'<div\s+class="gs_r\s+gs_or\s+gs_scl"[^>]*>(.*?)</div>\s*</div>\s*</div>',
-    re.DOTALL,
-)
 _CID_RE = re.compile(r'data-cid="([^"]+)"')
 _TITLE_ANCHOR_RE = re.compile(r'<h3\s+class="gs_rt"[^>]*>(.*?)</h3>', re.DOTALL)
 _HREF_RE = re.compile(r'href="([^"]+)"')
@@ -46,7 +42,9 @@ _VERSIONS_RE = re.compile(
 _YEAR_RE = re.compile(r"\b(19\d\d|20\d\d)\b")
 _TAG_STRIP_RE = re.compile(r"<[^>]+>")
 _LABEL_STRIP_RE = re.compile(r"\[(PDF|HTML|BOOK|CITATION|B|C)\]\s*", re.IGNORECASE)
-_DOI_EXTRACT_RE = re.compile(r"(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", re.IGNORECASE)
+_DOI_EXTRACT_RE = re.compile(
+    r"(10\.\d{4,9}/[-._;/:A-Za-z0-9]*(?:\([^)]*\)[-._;/:A-Za-z0-9]*)*)", re.IGNORECASE
+)
 
 
 class ScholarRateLimiter:
@@ -227,10 +225,21 @@ def parse_scholar_html(html_text: str) -> list[PaperRecord]:
                         year = int(ym.group(1))
                         break
 
-                if len(segments) >= 3:
-                    publication = f"{segments[1]} ({segments[2]})"
-                elif len(segments) == 2:
-                    publication = segments[1]
+                # Venue/publisher: drop year-only segments ("D Pratama - 2022 - Pub")
+                # and strip trailing ", YYYY" from venue segments.
+                venue_segments = [
+                    s for s in segments[1:] if not re.fullmatch(r"(?:19\d\d|20\d\d)\s*$", s)
+                ]
+                if len(venue_segments) >= 2:
+                    venue = re.sub(
+                        r",\s*(?:19\d\d|20\d\d)\s*$", "", venue_segments[0]
+                    ).strip()
+                    publication = f"{venue} ({venue_segments[1]})"
+                elif len(venue_segments) == 1:
+                    venue = re.sub(
+                        r",\s*(?:19\d\d|20\d\d)\s*$", "", venue_segments[0]
+                    ).strip()
+                    publication = venue
 
         # Abstract / Snippet from gs_rs
         abstract = None
@@ -263,7 +272,7 @@ def parse_scholar_html(html_text: str) -> list[PaperRecord]:
         if article_url:
             dm = _DOI_EXTRACT_RE.search(article_url)
             if dm:
-                doi = dm.group(1)
+                doi = dm.group(1).rstrip(".,")
 
         source_id = cid or (doi or str(abs(hash(title_text))))
 
@@ -389,9 +398,9 @@ class ScholarAdapter(SourceAdapter):
 
                     page_records = parse_scholar_html(html_text)
                     break
-                except AdapterError:
-                    raise
                 except Exception as e:
+                    if "anti-bot CAPTCHA or rate-limit triggered" in str(e):
+                        raise
                     last_error = e
                     logger.warning(
                         "Scholar fetch error on attempt %d/%d: %s. Rotating proxy...",

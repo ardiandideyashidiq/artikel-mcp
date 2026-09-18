@@ -306,9 +306,14 @@ class PaperCache:
 
         # Insert a stub record if the paper was downloaded directly without a prior search record
         doi = key if key.startswith("10.") else None
+        # arXiv IDs (raw or arxiv:-prefixed) are stored under source="arxiv" so
+        # dedup_key is arxiv:<id> and the service fast-path can find them.
+        arxiv_match = re.fullmatch(r"(?:(?:arxiv|arXiv):)?(\d{4}\.\d{4,5}(?:v\d+)?)", key)
+        source = "arxiv" if arxiv_match else "direct"
+        source_id = arxiv_match.group(1) if arxiv_match else key
         stub = PaperRecord(
-            source="direct",
-            source_id=key,
+            source=source,
+            source_id=source_id,
             title=f"Paper ({key})",
             doi=doi,
             markdown=markdown,
@@ -325,6 +330,12 @@ class PaperCache:
                 "OR lower(url)=? OR lower(pdf_url)=? OR lower(citekey)=?",
                 (key, key, key, key, key),
             ).fetchone()
+            # arXiv-ID-shaped keys are also stored under the arxiv: prefix
+            if row is None and re.fullmatch(r"\d{4}\.\d{4,5}(?:v\d+)?", key):
+                row = self._conn.execute(
+                    "SELECT * FROM papers WHERE dedup_key=?",
+                    (f"arxiv:{key}",),
+                ).fetchone()
             if row is None:
                 logger.debug("cache miss %s", key)
                 return None
@@ -403,11 +414,14 @@ class PaperCache:
         """Retrieve recent search queries, optionally filtered by keyword."""
         with self._lock:
             if query and query.strip():
-                pat = f"%{query.strip()}%"
+                escaped = (
+                    query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                )
+                pat = f"%{escaped}%"
                 rows = self._conn.execute(
                     """
                     SELECT * FROM search_queries
-                    WHERE raw_query LIKE ? OR cleaned_query LIKE ?
+                    WHERE raw_query LIKE ? ESCAPE '\\' OR cleaned_query LIKE ? ESCAPE '\\'
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,

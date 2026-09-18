@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait
 
 from artikel_mcp.models import PaperRecord
 from artikel_mcp.query_broker import adapt
@@ -46,12 +46,16 @@ SUPPORTED = sorted(_REGISTRY)
 def default_sources() -> list[str]:
     """Default sources queried during unified search fan-out.
 
-    Includes all supported sources (including 'scholar' backed by proxy rotation)
-    unless DISABLE_SCHOLAR_DEFAULT=1 is configured.
+    Google Scholar is opt-in by default because it scrapes an anti-bot protected
+    HTML interface; enable it with GOOGLE_SCHOLAR_DEFAULT=1.
+    DISABLE_SCHOLAR_DEFAULT=1 forces it off regardless.
     """
+    scholar_on = os.getenv("GOOGLE_SCHOLAR_DEFAULT", "0") == "1"
     if os.getenv("DISABLE_SCHOLAR_DEFAULT", "0") == "1":
-        return [s for s in SUPPORTED if s != "scholar"]
-    return list(SUPPORTED)
+        scholar_on = False
+    if scholar_on:
+        return list(SUPPORTED)
+    return [s for s in SUPPORTED if s != "scholar"]
 
 
 def supported_sources() -> list[str]:
@@ -105,23 +109,26 @@ def search_all(
     records: list[PaperRecord] = []
     errors: list[str] = []
     timeout_sec = float(os.getenv("SEARCH_ALL_TIMEOUT", "15.0"))
-    with ThreadPoolExecutor(max_workers=min(len(selected), 12)) as pool:
-        futures = {
-            pool.submit(_search_source, name, _query_for(name, query), limit): name
-            for name in selected
-        }
-        try:
-            for future in as_completed(futures, timeout=timeout_sec):
-                name = futures[future]
-                try:
-                    records.extend(future.result(timeout=5.0))
-                except Exception as e:  # isolation: one bad source never kills the rest
-                    logger.warning("source %s failed: %s", name, e)
-                    errors.append(f"{name}: {e}")
-        except TimeoutError:
-            logger.warning("search_all timed out waiting for remaining source futures")
-            for future, name in futures.items():
-                if not future.done():
-                    future.cancel()
-                    errors.append(f"{name}: timed out after {timeout_sec}s")
+    pool = ThreadPoolExecutor(max_workers=min(len(selected), 12))
+    futures = {
+        pool.submit(_search_source, name, _query_for(name, query), limit): name
+        for name in selected
+    }
+    try:
+        done, pending = wait(futures, timeout=timeout_sec)
+        for future in done:
+            name = futures[future]
+            try:
+                records.extend(future.result())
+            except Exception as e:  # isolation: one bad source never kills the rest
+                logger.warning("source %s failed: %s", name, e)
+                errors.append(f"{name}: {e}")
+        # A source already blocked on a slow request cannot be interrupted
+        # mid-flight; the HttpClient's own timeout is what actually bounds it.
+        for future in pending:
+            name = futures[future]
+            logger.warning("source %s timed out after %.1fs", name, timeout_sec)
+            errors.append(f"{name}: timed out after {timeout_sec}s")
+    finally:
+        pool.shutdown(wait=False)
     return records, errors

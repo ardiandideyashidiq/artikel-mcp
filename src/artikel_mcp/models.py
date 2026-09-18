@@ -54,7 +54,7 @@ def build_paper_url(record: PaperRecord) -> str:
     if record.source == "pmc":
         return f"https://www.ncbi.nlm.nih.gov/pmc/articles/{record.source_id}/"
     if record.source == "europepmc":
-        return f"https://europepmc.org/article/{record.source_id}"
+        return f"https://europepmc.org/article/{record.source_id.replace(':', '/')}"
     if record.source == "hal":
         return f"https://hal.science/{record.source_id}"
     if record.source == "doaj":

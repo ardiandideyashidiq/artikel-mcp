@@ -30,7 +30,7 @@ Run `ruff check` on every change. Verify with `uv run pytest` before finishing.
 - **Do not replace the HTTP client.** All network I/O goes through the curl-cffi browser-impersonating client in `http.py` (default `chrome124`). Swapping in requests/urllib/aiohttp breaks 403-bypass against university journals — the core feature.
 - **Adding a source/query index**: write an adapter in `sources/<name>.py` and register it in `sources/registry.py`; registry-owned sources get raw queries, everything else goes through `query_broker` adaptation.
 - **Offline tests must never hit the network.** Network tests are marked `network` (see `tests/test_smoke_global.py`, `tests/test_ojs.py`). Mock with monkeypatch/FakeClient as in `tests/test_ojs.py:121`.
-- Env vars: `ARTIKEL_MCP_DB` overrides DB path (default `~/.local/share/artikel-mcp/papers.db`); `UNPAYWALL_EMAIL` gates the Unpaywall open-access fallback (`pdf.py:49`).
+- Env vars: `ARTIKEL_MCP_DB` overrides DB path (default `~/.local/share/artikel-mcp/papers.db`); `UNPAYWALL_EMAIL` gates the Unpaywall open-access fallback (`pdf.py:49`); `GOOGLE_SCHOLAR_DEFAULT=1` opts scholar into `default_sources()` (`DISABLE_SCHOLAR_DEFAULT=1` forces it off); `ARTIKEL_MCP_ALLOWED_DIR` allowlists export/download paths (doc_citation.py:36); `ARTIKEL_MCP_ALLOW_PRIVATE_URLS=1` lifts the SSRF block on private/local URLs (http.py `validate_request_url`).
 - Logging: use `logging.getLogger("artikel_mcp.<module>")`; `logging.py` installs the handler once.
 
 ## OpenSpec workflow

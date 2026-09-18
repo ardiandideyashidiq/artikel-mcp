@@ -34,12 +34,26 @@ _SENSITIVE_PREFIXES = (
 
 
 def validate_safe_path(file_path: str | Path) -> Path:
-    """Validate that path does not point to restricted system directories."""
+    """Validate a path against restricted system directories and an optional allowlist.
+
+    The system-directory blocklist is always applied. When the environment variable
+    ``ARTIKEL_MCP_ALLOWED_DIR`` is set, access is additionally restricted to files
+    inside that directory subtree (a coarse working-directory sandbox).
+    """
     path = Path(file_path).resolve()
     path_str = str(path)
     for prefix in _SENSITIVE_PREFIXES:
         if path_str == prefix or path_str.startswith(prefix + "/"):
             raise PermissionError(f"Access denied: restricted system path '{path}'")
+    allowed = os.environ.get("ARTIKEL_MCP_ALLOWED_DIR")
+    if allowed:
+        allowed_root = Path(allowed).resolve()
+        try:
+            path.relative_to(allowed_root)
+        except ValueError:
+            raise PermissionError(
+                f"Access denied: path '{path}' is outside allowed directory '{allowed_root}'"
+            ) from None
     return path
 
 
@@ -56,10 +70,21 @@ def _atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
 _PANDOC_CITE_RE = re.compile(r"\[@([a-zA-Z0-9_.:/\\-]+)(?:,[^\]]*)?\]")
 _INLINE_CITE_RE = re.compile(r"(?<!\w)@([a-zA-Z0-9_.:/\\-]+)")
 _COMMENT_CITE_RE = re.compile(r"<!--\s*cite:\s*([^\s>]+)\s*-->")
-_DOI_EXPLICIT_RE = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)\b")
+_DOI_EXPLICIT_RE = re.compile(
+    r"\b(10\.\d{4,9}/[-._;/:A-Za-z0-9]*(?:\([^)]*\)[-._;/:A-Za-z0-9]*)*)"
+)
 _BIB_HEADER_RE = re.compile(
-    r"^(#{1,3}\s+(?:references|daftar pustaka|bibliography|works cited|literature cited))\b.*$",
+    r"^(?:(?:#{1,3}\s+)|\\(?:section|chapter)\*?\{)?\s*"
+    r"(references|daftar pustaka|bibliography|works cited|literature cited)"
+    r"\s*\}?\s*$",
     re.IGNORECASE | re.MULTILINE,
+)
+
+# Any top-level section heading that can follow a references section (e.g. an
+# appendix) so sync_file_bibliography can preserve content written after it.
+_SECTION_HEADER_RE = re.compile(
+    r"^(?:(?:#{1,3}\s+)|\\(?:section|subsection|chapter)\*?\{)\S",
+    re.MULTILINE,
 )
 
 
@@ -266,14 +291,20 @@ def remove_citation_from_file(
         patterns.append(re.compile(re.escape(rendered_narrative)))
 
     removed_count = 0
-    new_content = content
-    for pat in patterns:
-        matches = pat.findall(new_content)
-        removed_count += len(matches)
-        new_content = pat.sub("", new_content)
-
-    # Clean up double spaces created by deletion
-    new_content = re.sub(r"[ \t]{2,}", " ", new_content)
+    new_lines: list[str] = []
+    for line in content.splitlines():
+        removed_here = False
+        for pat in patterns:
+            if pat.search(line):
+                removed_here = True
+                removed_count += 1
+            line = pat.sub("", line)
+        # Collapse doubled whitespace only on lines where a token was removed,
+        # never across the whole document (would corrupt code/tables/LaTeX).
+        if removed_here:
+            line = re.sub(r"[ \t]{2,}", " ", line)
+        new_lines.append(line)
+    new_content = "\n".join(new_lines)
     _atomic_write_text(path, new_content, encoding="utf-8")
 
     bib_result = None
@@ -317,13 +348,22 @@ def sync_file_bibliography(
     else:
         bib_text = "*No cited papers found in document.*"
 
-    # Replace existing References section or append
+    # Replace existing References section or append. Content that follows the
+    # old references section (appendices, notes, follow-up sections) is preserved:
+    # only the old bibliography body between the heading and the next heading is
+    # replaced.
     m_bib = _BIB_HEADER_RE.search(content)
     if m_bib:
-        # Keep heading string found or use section_heading
         heading_found = m_bib.group(1)
         body = content[: m_bib.start()].rstrip()
+        tail = ""
+        rest = content[m_bib.end() :]
+        m_after = _SECTION_HEADER_RE.search(rest)
+        if m_after is not None:
+            tail = rest[m_after.start() :]
         new_content = f"{body}\n\n{heading_found}\n\n{bib_text}\n"
+        if tail:
+            new_content += f"\n{tail.rstrip()}\n"
     else:
         new_content = f"{content.rstrip()}\n\n{section_heading}\n\n{bib_text}\n"
 

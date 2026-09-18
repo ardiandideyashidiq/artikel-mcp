@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import dataclass
 
 from artikel_mcp.http import HttpClient, get_client
 
@@ -17,14 +16,6 @@ _UNPAYWALL = "https://api.unpaywall.org/v2/{doi}"
 
 class PdfError(RuntimeError):
     """Raised when a PDF cannot be downloaded, resolved, or extracted."""
-
-
-@dataclass
-class PdfResult:
-    pdf_url: str
-    markdown: str
-    used_fallback: bool = False
-    via_unpaywall: bool = False
 
 
 MAX_PDF_BYTES = 50 * 1024 * 1024  # 50 MB
@@ -128,15 +119,24 @@ def extract_markdown(
     max_pages: int = MAX_PDF_PAGES,
 ) -> tuple[str, bool]:
     """Extract PDF text to markdown: pymupdf + custom cleaner, with fallback."""
-    primary = _extract_with_pymupdf(
-        data, page_start=page_start, page_end=page_end, max_pages=max_pages
-    )
-    if primary and not _is_garbled(primary) and not force_fallback:
-        return primary, False
+    if page_end is not None and page_end < page_start:
+        raise PdfError(f"invalid page range: page_end ({page_end}) < page_start ({page_start})")
+    try:
+        primary = _extract_with_pymupdf(
+            data, page_start=page_start, page_end=page_end, max_pages=max_pages
+        )
+        if primary and not _is_garbled(primary) and not force_fallback:
+            return primary, False
+    except Exception as e:
+        logger.warning("pymupdf extraction failed (%s); falling back to pymupdf4llm", e)
+        primary = ""
     logger.info("pymupdf output garbled/empty; falling back to pymupdf4llm")
-    md = _extract_with_pymupdf4llm(
-        data, page_start=page_start, page_end=page_end, max_pages=max_pages
-    )
+    try:
+        md = _extract_with_pymupdf4llm(
+            data, page_start=page_start, page_end=page_end, max_pages=max_pages
+        )
+    except Exception as e:
+        raise PdfError(f"both PDF extraction paths failed: {e}") from e
     return md, True
 
 
@@ -183,7 +183,7 @@ def _extract_with_pymupdf4llm(
 
 def _is_garbled(text: str) -> bool:
     stripped = text.strip()
-    if len(stripped) < 200:
+    if len(stripped) < 20:
         return True
     # very low printable-density -> likely layout garbage
     return len(re.sub(r"\s", "", stripped)) == 0

@@ -48,12 +48,15 @@ guaranteed structured output, automatic query logging, SQLite/FTS5 caching, and 
 - Python 3.13, `uv` (or `uv run`).
 - `UNPAYWALL_EMAIL` (optional): email passed to Unpaywall for open-access fallback.
 - `ARTIKEL_MCP_DB` (optional): override the SQLite database path (default: `~/.local/share/artikel-mcp/papers.db`).
+- `GOOGLE_SCHOLAR_DEFAULT=1` (optional): include Google Scholar in the default source set; it is opt-in by default (`DISABLE_SCHOLAR_DEFAULT=1` still forces it off).
+- `ARTIKEL_MCP_ALLOWED_DIR` (optional): allowlist directory for paper paths; downloads and exports outside of it are rejected.
+- `ARTIKEL_MCP_ALLOW_PRIVATE_URLS=1` (optional): allow fetching private/loopback/local network URLs (default blocks them to prevent SSRF).
 
 ## Development & Verification
 
 ```bash
 uv sync            # install dependencies
-uv run pytest              # offline suite (currently 131 tests)
+uv run pytest              # offline suite (currently 158 tests, 16 network deselected)
 uv run pytest -m network   # live tests hitting real APIs + stdio protocol round-trip (skipped by default)
 uv run pytest tests/test_tool_smoke.py -v   # tool/resource/prompt inventory + full lifecycle (offline)
 uv run pytest -m network tests/test_tool_protocol.py -v  # JSON-RPC over a real stdio MCP client

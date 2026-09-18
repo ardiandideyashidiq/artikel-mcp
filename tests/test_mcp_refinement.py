@@ -107,7 +107,7 @@ def test_markdown_persistence_and_retrieval(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "artikel_mcp.service.extract_markdown",
-        lambda body, force_fallback=False: (
+        lambda body, **kwargs: (
             "# Deep Learning in Healthcare\n\nFull text content.",
             False,
         ),

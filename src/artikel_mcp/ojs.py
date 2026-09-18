@@ -28,7 +28,7 @@ _ANCHOR_TAG = re.compile(
     r"""<a\s+[^>]*?href\s*=\s*["']([^"']+)["'][^>]*?>(.*?)</a>""",
     re.I | re.DOTALL,
 )
-_DOI_RE = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)")
+_DOI_RE = re.compile(r"\b(10\.\d{4,9}/[-._;/:A-Za-z0-9]*(?:\([^)]*\)[-._;/:A-Za-z0-9]*)*)")
 _YEAR_RE = re.compile(r"\b(19\d\d|20\d\d)\b")
 _PDF_ANCHOR_TEXT = re.compile(r"\b(pdf|download pdf|unduh pdf|unduh|full text)\b", re.I)
 _OJS_VIEW_RE = re.compile(r"(/article/view/\d+)/(\d+)")
@@ -185,11 +185,14 @@ def build_candidate_pdf_urls(raw_pdf_url: str) -> list[str]:
 def resolve_and_download_ojs(
     target: str,
     client: HttpClient | None = None,
+    _depth: int = 0,
 ) -> tuple[bytes, OjsArticleMetadata]:
     """Resolve an OJS article page, DOI landing page, or direct PDF to PDF bytes and metadata.
 
     Returns (pdf_bytes, OjsArticleMetadata). Raises PdfError if PDF cannot be retrieved.
     """
+    if _depth >= 3:
+        raise PdfError(f"too many redirect layers resolving {target}")
     client = client or get_client()
     target_clean = target.strip()
 
@@ -236,7 +239,7 @@ def resolve_and_download_ojs(
             next_target = candidate_pdf or fulltext_url or doi_target
             if next_target:
                 logger.info("resolved DOAJ article %s to target %s", doaj_id, next_target)
-                body, meta = resolve_and_download_ojs(next_target, client=client)
+                body, meta = resolve_and_download_ojs(next_target, client=client, _depth=_depth + 1)
                 if not meta.doi and doi_found:
                     meta.doi = doi_found
                 if not meta.title and bib.get("title"):
@@ -286,23 +289,26 @@ def resolve_and_download_ojs(
 
     # Case 1: Direct PDF stream
     content_type = resp.headers.get("content-type", "").lower()
-    if resp.content.startswith(PDF_MAGIC) or "application/pdf" in content_type:
+    if "application/pdf" in content_type and not resp.content.startswith(PDF_MAGIC):
+        raise PdfError(f"content-type claims PDF but body is not a PDF: {landing_url}")
+    if resp.content.startswith(PDF_MAGIC):
+        final_url = resp.url or landing_url
         meta = OjsArticleMetadata(
-            pdf_url=resp.url or landing_url,
-            landing_url=resp.url or landing_url,
+            pdf_url=final_url,
+            landing_url=final_url,
         )
-        if "/article/download/" in landing_url:
+        if "/article/download/" in final_url:
             view_url = re.sub(
-                r"/article/download/(\d+)(?:/\d+)?.*", r"/article/view/\1", landing_url
+                r"/article/download/(\d+)(?:/\d+)?.*", r"/article/view/\1", final_url
             )
-            if view_url != landing_url:
+            if view_url != final_url:
                 try:
                     view_resp = client.get_response(view_url)
                     if "text/html" in view_resp.headers.get("content-type", "").lower():
                         vmeta = extract_ojs_metadata(
                             view_resp.text, base_url=view_resp.url or view_url
                         )
-                        vmeta.pdf_url = resp.url or landing_url
+                        vmeta.pdf_url = final_url
                         return resp.content, vmeta
                 except Exception as e:
                     logger.debug("failed to enrich metadata from OJS view URL %s: %s", view_url, e)
